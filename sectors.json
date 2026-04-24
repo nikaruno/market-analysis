@@ -1,0 +1,134 @@
+{
+  "sectors": {
+    "electricity": {
+      "name": "Electricity & Utilities",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/electricity/largest-electricity-companies-by-market-cap/",
+      "region": "global"
+    },
+    "oil-gas": {
+      "name": "Oil & Gas",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/oil-gas/largest-oil-and-gas-companies-by-market-cap/",
+      "region": "global"
+    },
+    "semiconductors": {
+      "name": "Semiconductors",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/semiconductors/largest-semiconductor-companies-by-market-cap/",
+      "region": "global"
+    },
+    "software": {
+      "name": "Software & Tech",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/software/largest-software-companies-by-market-cap/",
+      "region": "global"
+    },
+    "energy": {
+      "name": "Energy",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/energy/largest-companies-by-market-cap/",
+      "region": "global"
+    },
+    "defense": {
+      "name": "Defense & Aerospace",
+      "enabled": true,
+      "type": "scraped",
+      "url": "https://companiesmarketcap.com/aerospace/largest-companies-by-market-cap/",
+      "region": "global"
+    },
+    "bist-holdings": {
+      "name": "BIST Holdings & Conglomerates",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "KCHOL.IS",
+        "SAHOL.IS",
+        "DOHOL.IS",
+        "TAVHL.IS",
+        "ENKAI.IS",
+        "EKGYO.IS",
+        "ISGYO.IS"
+      ],
+      "region": "turkey"
+    },
+    "bist-banks": {
+      "name": "BIST Banks & Finance",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "GARAN.IS",
+        "AKBNK.IS",
+        "YKBNK.IS",
+        "ISCTR.IS",
+        "HALKB.IS",
+        "VAKBN.IS"
+      ],
+      "region": "turkey"
+    },
+    "bist-industry": {
+      "name": "BIST Industry & Auto",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "TOASO.IS",
+        "FROTO.IS",
+        "OTKAR.IS",
+        "EREGL.IS",
+        "KRDMD.IS",
+        "CIMSA.IS",
+        "ARCLK.IS",
+        "VESTL.IS",
+        "ASTOR.IS",
+        "SISE.IS"
+      ],
+      "region": "turkey"
+    },
+    "bist-energy": {
+      "name": "BIST Energy & Chemicals",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "TUPRS.IS",
+        "PETKM.IS",
+        "AYGAZ.IS",
+        "AKFYE.IS"
+      ],
+      "region": "turkey"
+    },
+    "bist-consumer": {
+      "name": "BIST Consumer & Retail",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "BIMAS.IS",
+        "MGROS.IS",
+        "SOKM.IS",
+        "ULKER.IS",
+        "CCOLA.IS",
+        "BANVT.IS",
+        "AEFES.IS",
+        "MPARK.IS"
+      ],
+      "region": "turkey"
+    },
+    "bist-telecom": {
+      "name": "BIST Telecom, Transport & Defense",
+      "enabled": true,
+      "type": "manual",
+      "tickers": [
+        "THYAO.IS",
+        "PGSUS.IS",
+        "TTKOM.IS",
+        "TCELL.IS",
+        "ASELS.IS"
+      ],
+      "region": "turkey"
+    }
+  }
+}

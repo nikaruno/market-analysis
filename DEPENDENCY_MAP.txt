@@ -1,0 +1,243 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                                                                              ║
+║              📊 MARKET ANALYSIS SYSTEM - DEPENDENCY MAP                     ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 EXECUTION FLOW (9 Steps)
+═══════════════════════════════════════════════════════════════════════════════
+
+START: automate_analysis_with_tech.py
+  │
+  ├─ Step 1/9: Download Market Data
+  │   ├─ CALLS: download_market_data.py
+  │   ├─ OUTPUT: data/market_data.csv
+  │   └─ DEPENDS ON: yfinance (Yahoo Finance API)
+  │
+  ├─ Step 2/9: Compute Market Regimes
+  │   ├─ CALLS: market_regime.py
+  │   ├─ INPUT: data/market_data.csv
+  │   ├─ OUTPUT: data/market_data_with_regimes.csv
+  │   └─ DEPENDS ON: pandas, numpy
+  │
+  ├─ Step 3/9: Generate Visualizations
+  │   ├─ CALLS: visualize.py
+  │   ├─ INPUT: data/market_data_with_regimes.csv
+  │   ├─ OUTPUT: data/plots/*.png
+  │   └─ DEPENDS ON: matplotlib, seaborn
+  │
+  ├─ Step 4/9: Scrape Top Companies
+  │   ├─ CALLS: scrape_fundamentals.py
+  │   ├─ OUTPUT: data/fundamentals_raw.csv
+  │   ├─ DEPENDS ON: beautifulsoup4, requests
+  │   └─ CONFIG: companies_per_sector (default: 10)
+  │
+  ├─ Step 5/9: Download Detailed Fundamentals
+  │   ├─ CALLS: download_detailed_fundamentals.py
+  │   ├─ INPUT: data/fundamentals_raw.csv
+  │   ├─ OUTPUT: data/fundamentals/raw/[TICKER].csv (60 files)
+  │   └─ DEPENDS ON: yfinance
+  │
+  ├─ Step 6/9: Compute Company Metrics
+  │   ├─ CALLS: compute_detailed_metrics.py
+  │   ├─ INPUT: data/fundamentals/raw/*.csv
+  │   ├─ OUTPUT: data/fundamentals/company_metrics.csv
+  │   └─ DEPENDS ON: pandas, numpy
+  │
+  ├─ Step 7/9: Compute Absolute Quality Scores ⭐
+  │   ├─ CALLS: absolute_scores.py
+  │   ├─ INPUT: data/fundamentals/company_metrics.csv
+  │   ├─ INPUT: config.json (weights!)
+  │   ├─ OUTPUT: data/fundamentals/absolute_scores.csv
+  │   └─ DEPENDS ON: pandas, numpy, json
+  │
+  ├─ Step 8/9: Technical Analysis
+  │   ├─ CALLS: technical_analysis.py
+  │   ├─ INPUT: data/fundamentals/absolute_scores.csv
+  │   ├─ OUTPUT: data/technical_analysis.csv
+  │   ├─ OUTPUT: data/technical_charts/*.png
+  │   ├─ DEPENDS ON: yfinance, ta (technical analysis library)
+  │   └─ CALLS: technical_charts.py (for visualization)
+  │
+  └─ Step 9/9: Generate Report
+      ├─ CALLS: report_generator_enhanced.py
+      ├─ INPUT: data/market_data_with_regimes.csv
+      ├─ INPUT: data/fundamentals/absolute_scores.csv
+      ├─ INPUT: data/technical_analysis.csv
+      ├─ OUTPUT: data/executive_summary.md
+      └─ DEPENDS ON: pandas
+
+═══════════════════════════════════════════════════════════════════════════════
+📁 FILE DEPENDENCY TREE
+═══════════════════════════════════════════════════════════════════════════════
+
+automation_scripts/
+└─ automate_analysis_with_tech.py (ORCHESTRATOR)
+   │
+   └─ Calls all modules below ↓
+
+src/exMarket/
+├─ download_market_data.py
+│  └─ Dependencies: yfinance, pandas, time
+│
+├─ market_regime.py
+│  └─ Dependencies: pandas, numpy
+│
+├─ visualize.py
+│  └─ Dependencies: matplotlib, seaborn, pandas
+│
+├─ scrape_fundamentals.py
+│  └─ Dependencies: beautifulsoup4, requests, pandas
+│
+├─ download_detailed_fundamentals.py
+│  └─ Dependencies: yfinance, pandas
+│
+├─ compute_detailed_metrics.py
+│  └─ Dependencies: pandas, numpy
+│
+├─ absolute_scores.py ⭐ (USES CONFIG!)
+│  └─ Dependencies: pandas, numpy, json
+│  └─ Reads: config.json
+│
+├─ technical_analysis.py
+│  └─ Dependencies: yfinance, pandas, ta
+│  └─ Calls: technical_charts.py
+│
+├─ technical_charts.py
+│  └─ Dependencies: matplotlib, pandas
+│
+└─ run_interactive.py (NOT USED in automation)
+
+automation_scripts/
+└─ report_generator_enhanced.py
+   └─ Dependencies: pandas
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 DATA FLOW DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
+
+[Yahoo Finance API]
+        ↓
+[download_market_data.py] → data/market_data.csv
+        ↓
+[market_regime.py] → data/market_data_with_regimes.csv
+        ↓
+[visualize.py] → data/plots/*.png
+
+[Finviz.com Screener]
+        ↓
+[scrape_fundamentals.py] → data/fundamentals_raw.csv
+        ↓
+[download_detailed_fundamentals.py] → data/fundamentals/raw/[TICKER].csv
+        ↓
+[compute_detailed_metrics.py] → data/fundamentals/company_metrics.csv
+        ↓
+[absolute_scores.py] + [config.json] → data/fundamentals/absolute_scores.csv
+        ↓                                        ↓
+[technical_analysis.py] ←──────────────────────┘
+        ↓
+data/technical_analysis.csv + data/technical_charts/*.png
+        ↓
+[report_generator_enhanced.py] → data/executive_summary.md
+
+═══════════════════════════════════════════════════════════════════════════════
+⭐ CRITICAL FILES FOR TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════════
+
+IF ERROR IN STEP 1 (Downloading Market Data):
+  → Check: src/exMarket/download_market_data.py
+  → Issue: Usually network/rate limits from Yahoo Finance
+  → Fix: Add delays, retry logic, or wait
+
+IF ERROR IN STEP 4 (Scraping Companies):
+  → Check: src/exMarket/scrape_fundamentals.py
+  → Issue: Finviz.com changes format or blocks requests
+  → Fix: Update scraping selectors
+
+IF ERROR IN STEP 7 (Quality Scores):
+  → Check: src/exMarket/absolute_scores.py
+  → Issue: Missing columns, wrong paths, config not found
+  → Fix: Verify company_metrics.csv exists, check config.json
+
+IF ERROR IN STEP 8 (Technical Analysis):
+  → Check: src/exMarket/technical_analysis.py
+  → Issue: Rate limits, missing ticker data
+  → Fix: Add delays between ticker downloads
+
+IF NO DATA IN GUI:
+  → Check: data/fundamentals/absolute_scores.csv exists
+  → Check: gui/app.py is in correct directory
+  → Check: config.json has correct weights
+
+═══════════════════════════════════════════════════════════════════════════════
+🔍 KEY DEPENDENCIES BY MODULE
+═══════════════════════════════════════════════════════════════════════════════
+
+NETWORK DEPENDENT (can fail due to internet):
+  • download_market_data.py (Yahoo Finance)
+  • scrape_fundamentals.py (Finviz.com)
+  • download_detailed_fundamentals.py (Yahoo Finance)
+  • technical_analysis.py (Yahoo Finance)
+
+PATH DEPENDENT (need correct working directory):
+  • absolute_scores.py (reads config.json, reads/writes data/)
+  • All modules (read/write to data/ directory)
+  • GUI app.py (must run from market-analysis/ directory)
+
+CONFIG DEPENDENT (reads config.json):
+  • absolute_scores.py (weight configuration)
+  • Future: scrape_fundamentals.py (companies_per_sector)
+
+═══════════════════════════════════════════════════════════════════════════════
+🎯 DEBUGGING STRATEGY
+═══════════════════════════════════════════════════════════════════════════════
+
+1. IDENTIFY WHICH STEP FAILED
+   → Look at terminal output: "Step X/9: ..."
+   → Note which step showed "✗ Failed"
+
+2. CHECK THE FILE FOR THAT STEP
+   → Use the mapping above
+   → Example: Step 7 failed → Check absolute_scores.py
+
+3. VERIFY INPUTS EXIST
+   → Each step needs input from previous step
+   → Example: Step 7 needs company_metrics.csv from Step 6
+
+4. RUN MODULE STANDALONE
+   cd market-analysis
+   export PYTHONPATH="$(pwd)/src/exMarket:$(pwd)"
+   python3 src/exMarket/[MODULE_NAME].py
+
+5. CHECK OUTPUT
+   → Verify expected output file was created
+   → Check file is not empty
+   → Verify CSV has expected columns
+
+═══════════════════════════════════════════════════════════════════════════════
+📝 QUICK REFERENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+MAIN ORCHESTRATOR:
+  automation_scripts/automate_analysis_with_tech.py
+
+CRITICAL FOR GUI:
+  data/fundamentals/absolute_scores.csv (Step 7 output)
+
+USES YOUR CUSTOM WEIGHTS:
+  src/exMarket/absolute_scores.py (reads config.json)
+
+CREATES CONFIG:
+  gui/app.py (writes config.json when you click "Run Analysis")
+
+MOST LIKELY TO FAIL:
+  - Step 1: download_market_data.py (rate limits)
+  - Step 4: scrape_fundamentals.py (website changes)
+  - Step 8: technical_analysis.py (rate limits)
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Use this map to quickly identify which file to check when errors occur! 🎯
+
+╚══════════════════════════════════════════════════════════════════════════════╝

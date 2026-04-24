@@ -1,0 +1,29 @@
+Genel olarak her bileşenin maksimum ve minimum değerini görmek faydalı olabilir.
+
+==== ROIC ==== %20
+Son 4 yılın averajını alırken trendi gözden kaçırabiliyor. Artma veya azalmayı önemsemiyor. Son yıllara daha fazla ağırlık verilebilir.
+==== FCF ==== %15
+Burada da aynı durum sözkonusu. Son yıllara ağırlık vermek mantıklı olabilir
+==== REVENUE GROWTH ==== %15
+Değiştirmeye gerek yok
+==== MARGIN STABILITY ==== %10
+Karın gelire göre oranının yıllara göre değişimi
+=== LEVERAGE ====
+Burada da son yıllara biraz daha ağırlık verilebilir
+=== CASH QUALITY ====
+Bunun için de aynı durum, nasıl 3-4 kat çıkabiliyor kısmını anlamadım.
+=== INTEREST COVERAGE ====
+GEVde neden yok anlamadım, payda 0 olunca ne yapılacak
+=== OPERATING MARGIN TREND ====
+bu güzelmiş
+
+Neden income growth yok? Eklemek iyi olabilir
+
+Overview & Report sekmesinden ne anlamam gerekiyoru sor, gereksizse kaldır
+Top Companies sekmesinde quality percentile kısmını çıkar, quality_score a göre renklendirme olsun (iyi - yeşil, nötr- sarı, kötü - kırmızı)
+roic average a göre sıralama yanlış çalışıyor (text kullanıyor olabilir numeric yerine), diğerlerinde de durum aynı
+Technical analysisde de quality score a göre renklendirme yapılabilir
+Company lookup a seçilen hissenin stock price grafiği eklensin (son 1 yıl için)
+
+
+
