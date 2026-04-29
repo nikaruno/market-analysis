@@ -1,122 +1,117 @@
-# Quality Score — Cell-Level Calculation Trace
+# Quality Score v3 — Cell-Level Calculation Trace
 
 ## EQNR (Equinor) vs GEV (GE Vernova)
 
-Every number below is traced to its exact source: **`FILE → Row Name → Column (Year)`**
+**v3 changes from v2:**
+- ✅ **EMA averaging** for ROIC, FCF, Leverage, Cash Quality (recent years weighted more: 10% → 17% → 28% → 46%)
+- ✅ **Net Income Growth** added as new metric (10% weight)
+- ❌ **Interest Coverage removed** (too noisy — NaN for low-debt companies, range −246x to +303x)
 
-Source files per company:
-- `{TICKER}_income.csv` — Income Statement (rows × year columns)
-- `{TICKER}_balance.csv` — Balance Sheet (rows × year columns)
-- `{TICKER}_cashflow.csv` — Cash Flow Statement (rows × year columns)
+Every number traced to: **`FILE → Row Name → Column (Year)`**
 
 ---
 
-## 1. ROIC — Return on Invested Capital (Weight: 20%)
+## 1. ROIC — Return on Invested Capital (Weight: 20%, EMA)
 
 ```
 ROIC = NOPAT / Invested Capital
 NOPAT = Operating Income × (1 − Tax Rate)
 Invested Capital = Total Equity + Total Debt − Cash
+Averaging: EMA (weights: 2022=10%, 2023=17%, 2024=28%, 2025=46%)
 ```
 
 ### EQNR
 
-**Step 1: Get NOPAT (from Income Statement)**
+**Step 1: NOPAT (from Income Statement)**
 
 | Year | Operating Income | Source | × (1 − Tax Rate) | Source | = NOPAT |
 |------|-----------------|--------|-------------------|--------|---------|
-| 2022 | 77,741,000,000 | `EQNR_income.csv → "Operating Income" → 2022-12-31` | × (1 − 0.22) | `EQNR_income.csv → "Tax Rate For Calcs" → 2022-12-31` | **60,638,180,000** |
-| 2023 | 35,233,000,000 | `EQNR_income.csv → "Operating Income" → 2023-12-31` | × (1 − 0.22) | `EQNR_income.csv → "Tax Rate For Calcs" → 2023-12-31` | **27,481,740,000** |
-| 2024 | 30,354,000,000 | `EQNR_income.csv → "Operating Income" → 2024-12-31` | × (1 − 0.22) | `EQNR_income.csv → "Tax Rate For Calcs" → 2024-12-31` | **23,676,120,000** |
-| 2025 | 24,730,000,000 | `EQNR_income.csv → "Operating Income" → 2025-12-31` | × (1 − 0.22) | `EQNR_income.csv → "Tax Rate For Calcs" → 2025-12-31` | **19,289,400,000** |
+| 2022 | 77,741,000,000 | `EQNR_income.csv → "Operating Income" → 2022-12-31` | × (1 − 0.22) | `→ "Tax Rate For Calcs" → 2022-12-31` | **60,638,180,000** |
+| 2023 | 35,233,000,000 | `EQNR_income.csv → "Operating Income" → 2023-12-31` | × (1 − 0.22) | `→ "Tax Rate For Calcs" → 2023-12-31` | **27,481,740,000** |
+| 2024 | 30,354,000,000 | `EQNR_income.csv → "Operating Income" → 2024-12-31` | × (1 − 0.22) | `→ "Tax Rate For Calcs" → 2024-12-31` | **23,676,120,000** |
+| 2025 | 24,730,000,000 | `EQNR_income.csv → "Operating Income" → 2025-12-31` | × (1 − 0.22) | `→ "Tax Rate For Calcs" → 2025-12-31` | **19,289,400,000** |
 
-**Step 2: Get Invested Capital (from Balance Sheet)**
+**Step 2: Invested Capital (from Balance Sheet)**
 
-| Year | Equity | Source | + Debt | Source | − Cash | Source | = Invested Capital |
-|------|--------|--------|--------|--------|--------|--------|--------------------|
-| 2022 | 53,989,000,000 | `EQNR_balance.csv → "Total Equity Gross Minority Interest" → 2022-12-31` | 32,167,000,000 | `EQNR_balance.csv → "Total Debt" → 2022-12-31` | 9,438,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2022-12-31` | **76,718,000,000** |
-| 2023 | 48,500,000,000 | `EQNR_balance.csv → "Total Equity Gross Minority Interest" → 2023-12-31` | 31,795,000,000 | `EQNR_balance.csv → "Total Debt" → 2023-12-31` | 8,070,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2023-12-31` | **72,225,000,000** |
-| 2024 | 42,380,000,000 | `EQNR_balance.csv → "Total Equity Gross Minority Interest" → 2024-12-31` | 30,095,000,000 | `EQNR_balance.csv → "Total Debt" → 2024-12-31` | 5,903,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2024-12-31` | **66,572,000,000** |
-| 2025 | 40,497,000,000 | `EQNR_balance.csv → "Total Equity Gross Minority Interest" → 2025-12-31` | 31,220,000,000 | `EQNR_balance.csv → "Total Debt" → 2025-12-31` | 5,036,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2025-12-31` | **66,681,000,000** |
+| Year | Equity | Source | + Debt | Source | − Cash | Source | = Inv. Capital |
+|------|--------|--------|--------|--------|--------|--------|----------------|
+| 2022 | 53,989M | `EQNR_balance.csv → "Total Equity Gross Minority Interest" → 2022` | 32,167M | `→ "Total Debt" → 2022` | 9,438M | `→ "Cash And Cash Equivalents" → 2022` | **76,718M** |
+| 2023 | 48,500M | `→ 2023` | 31,795M | `→ 2023` | 8,070M | `→ 2023` | **72,225M** |
+| 2024 | 42,380M | `→ 2024` | 30,095M | `→ 2024` | 5,903M | `→ 2024` | **66,572M** |
+| 2025 | 40,497M | `→ 2025` | 31,220M | `→ 2025` | 5,036M | `→ 2025` | **66,681M** |
 
-**Step 3: ROIC = NOPAT / Invested Capital**
+**Step 3: Yearly ROIC → EMA Average**
 
-| Year | NOPAT | ÷ Invested Capital | = ROIC |
-|------|-------|---------------------|--------|
-| 2022 | 60,638,180,000 | ÷ 76,718,000,000 | **79.0%** |
-| 2023 | 27,481,740,000 | ÷ 72,225,000,000 | **38.0%** |
-| 2024 | 23,676,120,000 | ÷ 66,572,000,000 | **35.6%** |
-| 2025 | 19,289,400,000 | ÷ 66,681,000,000 | **28.9%** |
+| Year | NOPAT ÷ Inv. Capital | = ROIC | × EMA Weight |
+|------|----------------------|--------|--------------|
+| 2022 | 60,638M ÷ 76,718M | **79.0%** | × 10% |
+| 2023 | 27,482M ÷ 72,225M | **38.1%** | × 17% |
+| 2024 | 23,676M ÷ 66,572M | **35.6%** | × 28% |
+| 2025 | 19,289M ÷ 66,681M | **28.9%** | × 46% |
 
-**EQNR ROIC Average = (79.0 + 38.0 + 35.6 + 28.9) / 4 = 45.4%**
+```
+v2 (SMA): (79.0 + 38.1 + 35.6 + 28.9) / 4 = 45.4%
+v3 (EMA): 79.0×10% + 38.1×17% + 35.6×28% + 28.9×46% = 37.2%  ← 2022 spike matters less
+```
 
----
+**EQNR ROIC = 37.2% (EMA)**  ↓ from 45.4% (SMA)
 
 ### GEV
 
-**Step 1: NOPAT**
+**Step 1–2: NOPAT and Invested Capital**
 
-| Year | Operating Income | Source | × (1 − Tax Rate) | Source | = NOPAT |
-|------|-----------------|--------|-------------------|--------|---------|
-| 2022 | −2,881,000,000 | `GEV_income.csv → "Operating Income" → 2022-12-31` | × (1 − 0.21) | `GEV_income.csv → "Tax Rate For Calcs" → 2022-12-31` | **−2,275,990,000** |
-| 2023 | −923,000,000 | `GEV_income.csv → "Operating Income" → 2023-12-31` | × (1 − 0.21) | `GEV_income.csv → "Tax Rate For Calcs" → 2023-12-31` | **−729,170,000** |
-| 2024 | 471,000,000 | `GEV_income.csv → "Operating Income" → 2024-12-31` | × (1 − 0.376) | `GEV_income.csv → "Tax Rate For Calcs" → 2024-12-31` | **293,904,000** |
-| 2025 | 1,389,000,000 | `GEV_income.csv → "Operating Income" → 2025-12-31` | × (1 − 0.21) | `GEV_income.csv → "Tax Rate For Calcs" → 2025-12-31` | **1,097,310,000** |
+| Year | Op Income | Source | × (1−Tax) | Equity | Debt | Cash | Inv. Capital | ROIC |
+|------|-----------|--------|-----------|--------|------|------|--------------|------|
+| 2022 | −2,881M | `GEV_income.csv → "Operating Income" → 2022` | × 0.79 | 11,607M | 1,144M | 2,067M | 10,684M | **−21.3%** |
+| 2023 | −923M | `→ 2023` | × 0.79 | 8,380M | 1,157M | 1,551M | 7,986M | **−9.1%** |
+| 2024 | 471M | `→ 2024` | × 0.624 | 10,593M | 1,043M | 8,205M | 3,431M | **8.6%** |
+| 2025 | 1,389M | `→ 2025` | × 0.79 | 12,296M | 1,172M | 8,848M | 4,620M | **23.8%** |
 
-**Step 2: Invested Capital**
+```
+v2 (SMA): (−21.3 + (−9.1) + 8.6 + 23.8) / 4 = 0.5%
+v3 (EMA): −21.3×10% + (−9.1)×17% + 8.6×28% + 23.8×46% = 9.7%  ← turnaround weighted more
+```
 
-| Year | Equity | Source | + Debt | Source | − Cash | Source | = Invested Capital |
-|------|--------|--------|--------|--------|--------|--------|--------------------|
-| 2022 | 11,607,000,000 | `GEV_balance.csv → "Total Equity Gross Minority Interest" → 2022-12-31` | 1,144,000,000 | `GEV_balance.csv → "Total Debt" → 2022-12-31` | 2,067,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2022-12-31` | **10,684,000,000** |
-| 2023 | 8,380,000,000 | `GEV_balance.csv → "Total Equity Gross Minority Interest" → 2023-12-31` | 1,157,000,000 | `GEV_balance.csv → "Total Debt" → 2023-12-31` | 1,551,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2023-12-31` | **7,986,000,000** |
-| 2024 | 10,593,000,000 | `GEV_balance.csv → "Total Equity Gross Minority Interest" → 2024-12-31` | 1,043,000,000 | `GEV_balance.csv → "Total Debt" → 2024-12-31` | 8,205,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2024-12-31` | **3,431,000,000** |
-| 2025 | 12,296,000,000 | `GEV_balance.csv → "Total Equity Gross Minority Interest" → 2025-12-31` | 1,172,000,000 | `GEV_balance.csv → "Total Debt" → 2025-12-31` | 8,848,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2025-12-31` | **4,620,000,000** |
-
-**Step 3: ROIC**
-
-| Year | NOPAT | ÷ Invested Capital | = ROIC |
-|------|-------|---------------------|--------|
-| 2022 | −2,275,990,000 | ÷ 10,684,000,000 | **−21.3%** |
-| 2023 | −729,170,000 | ÷ 7,986,000,000 | **−9.1%** |
-| 2024 | 293,904,000 | ÷ 3,431,000,000 | **8.6%** |
-| 2025 | 1,097,310,000 | ÷ 4,620,000,000 | **23.8%** |
-
-**GEV ROIC Average = (−21.3 + (−9.1) + 8.6 + 23.8) / 4 = 0.5%**
+**GEV ROIC = 9.7% (EMA)**  ↑ from 0.5% (SMA)
 
 ---
 
-## 2. FCF Margin (Weight: 15%)
+## 2. FCF Margin (Weight: 15%, EMA)
 
 ```
-FCF Margin = Free Cash Flow / Total Revenue
-FCF = Operating Cash Flow − Capital Expenditures
+FCF Margin = (Operating Cash Flow − |Capital Expenditure|) / Total Revenue
+Averaging: EMA
 ```
 
 ### EQNR
 
-| Year | Operating CF | Source | − CapEx (abs) | Source | = FCF | ÷ Revenue | Source | = Margin |
-|------|-------------|--------|---------------|--------|-------|-----------|--------|----------|
-| 2022 | 35,136,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2022-12-31` | 8,758,000,000 | `EQNR_cashflow.csv → "Capital Expenditure" → 2022-12-31` (−8,758M) | **26,378,000,000** | ÷ 149,004,000,000 | `EQNR_income.csv → "Total Revenue" → 2022-12-31` | **17.7%** |
-| 2023 | 29,257,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2023-12-31` | 10,575,000,000 | `EQNR_cashflow.csv → "Capital Expenditure" → 2023-12-31` (−10,575M) | **18,682,000,000** | ÷ 106,848,000,000 | `EQNR_income.csv → "Total Revenue" → 2023-12-31` | **17.5%** |
-| 2024 | 19,465,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2024-12-31` | 12,177,000,000 | `EQNR_cashflow.csv → "Capital Expenditure" → 2024-12-31` (−12,177M) | **7,288,000,000** | ÷ 102,502,000,000 | `EQNR_income.csv → "Total Revenue" → 2024-12-31` | **7.1%** |
-| 2025 | 19,971,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2025-12-31` | 13,994,000,000 | `EQNR_cashflow.csv → "Capital Expenditure" → 2025-12-31` (−13,994M) | **5,977,000,000** | ÷ 105,828,000,000 | `EQNR_income.csv → "Total Revenue" → 2025-12-31` | **5.6%** |
+| Year | OCF | Source | − |CapEx| | Source | = FCF | ÷ Revenue | Source | = Margin | × EMA |
+|------|-----|--------|-----------|--------|-------|-----------|--------|----------|-------|
+| 2022 | 35,136M | `EQNR_cashflow.csv → "Operating Cash Flow" → 2022` | 8,758M | `→ "Capital Expenditure" → 2022` | 26,378M | ÷ 149,004M | `EQNR_income.csv → "Total Revenue" → 2022` | **17.7%** | ×10% |
+| 2023 | 29,257M | `→ 2023` | 10,575M | `→ 2023` | 18,682M | ÷ 106,848M | `→ 2023` | **17.5%** | ×17% |
+| 2024 | 19,465M | `→ 2024` | 12,177M | `→ 2024` | 7,288M | ÷ 102,502M | `→ 2024` | **7.1%** | ×28% |
+| 2025 | 19,971M | `→ 2025` | 13,994M | `→ 2025` | 5,977M | ÷ 105,828M | `→ 2025` | **5.6%** | ×46% |
 
-**EQNR FCF Margin Average = (17.7 + 17.5 + 7.1 + 5.6) / 4 = 12.0%**
+```
+v2 (SMA): 12.0%  →  v3 (EMA): 9.2%
+```
 
 ### GEV
 
-| Year | Operating CF | Source | − CapEx (abs) | Source | = FCF | ÷ Revenue | Source | = Margin |
-|------|-------------|--------|---------------|--------|-------|-----------|--------|----------|
-| 2022 | −114,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2022-12-31` | 513,000,000 | `GEV_cashflow.csv → "Capital Expenditure" → 2022-12-31` (−513M) | **−627,000,000** | ÷ 29,654,000,000 | `GEV_income.csv → "Total Revenue" → 2022-12-31` | **−2.1%** |
-| 2023 | 1,186,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2023-12-31` | 744,000,000 | `GEV_cashflow.csv → "Capital Expenditure" → 2023-12-31` (−744M) | **442,000,000** | ÷ 33,239,000,000 | `GEV_income.csv → "Total Revenue" → 2023-12-31` | **1.3%** |
-| 2024 | 2,583,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2024-12-31` | 883,000,000 | `GEV_cashflow.csv → "Capital Expenditure" → 2024-12-31` (−883M) | **1,700,000,000** | ÷ 34,935,000,000 | `GEV_income.csv → "Total Revenue" → 2024-12-31` | **4.9%** |
-| 2025 | 4,987,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2025-12-31` | 1,277,000,000 | `GEV_cashflow.csv → "Capital Expenditure" → 2025-12-31` (−1,277M) | **3,710,000,000** | ÷ 38,068,000,000 | `GEV_income.csv → "Total Revenue" → 2025-12-31` | **9.7%** |
+| Year | OCF | − |CapEx| | = FCF | ÷ Revenue | = Margin | × EMA |
+|------|-----|-----------| ------|-----------|----------|-------|
+| 2022 | −114M | 513M | −627M | ÷ 29,654M | **−2.1%** | ×10% |
+| 2023 | 1,186M | 744M | 442M | ÷ 33,239M | **1.3%** | ×17% |
+| 2024 | 2,583M | 883M | 1,700M | ÷ 34,935M | **4.9%** | ×28% |
+| 2025 | 4,987M | 1,277M | 3,710M | ÷ 38,068M | **9.7%** | ×46% |
 
-**GEV FCF Margin Average = (−2.1 + 1.3 + 4.9 + 9.7) / 4 = 3.5%**
+```
+v2 (SMA): 3.5%  →  v3 (EMA): 5.8%
+```
 
 ---
 
-## 3. Revenue Growth — CAGR (Weight: 15%)
+## 3. Revenue Growth — CAGR (Weight: 10%, unchanged)
 
 ```
 Revenue CAGR = (Revenue_last / Revenue_first) ^ (1/(n−1)) − 1
@@ -126,291 +121,271 @@ Revenue CAGR = (Revenue_last / Revenue_first) ^ (1/(n−1)) − 1
 
 | Position | Value | Source |
 |----------|-------|--------|
-| Revenue first (2022) | 149,004,000,000 | `EQNR_income.csv → "Total Revenue" → 2022-12-31` |
-| Revenue last (2025) | 105,828,000,000 | `EQNR_income.csv → "Total Revenue" → 2025-12-31` |
+| First (2022) | 149,004,000,000 | `EQNR_income.csv → "Total Revenue" → 2022-12-31` |
+| Last (2025) | 105,828,000,000 | `EQNR_income.csv → "Total Revenue" → 2025-12-31` |
 
 ```
-CAGR = (105,828,000,000 / 149,004,000,000) ^ (1/3) − 1
-     = (0.7103) ^ (0.333) − 1 = −10.7%
+CAGR = (105,828 / 149,004) ^ (1/3) − 1 = −10.8%
 ```
 
-**YoY Breakdown:**
-
-| Period | Revenue | Source | YoY |
-|--------|---------|--------|-----|
-| 2022 | 149,004,000,000 | `EQNR_income.csv → "Total Revenue" → 2022-12-31` | — |
-| 2023 | 106,848,000,000 | `EQNR_income.csv → "Total Revenue" → 2023-12-31` | **−28.3%** |
-| 2024 | 102,502,000,000 | `EQNR_income.csv → "Total Revenue" → 2024-12-31` | **−4.1%** |
-| 2025 | 105,828,000,000 | `EQNR_income.csv → "Total Revenue" → 2025-12-31` | **+3.2%** |
+**YoY:** $149.0B → $106.8B (−28%) → $102.5B (−4%) → $105.8B (+3%)
 
 ### GEV
 
 | Position | Value | Source |
 |----------|-------|--------|
-| Revenue first (2022) | 29,654,000,000 | `GEV_income.csv → "Total Revenue" → 2022-12-31` |
-| Revenue last (2025) | 38,068,000,000 | `GEV_income.csv → "Total Revenue" → 2025-12-31` |
+| First (2022) | 29,654,000,000 | `GEV_income.csv → "Total Revenue" → 2022-12-31` |
+| Last (2025) | 38,068,000,000 | `GEV_income.csv → "Total Revenue" → 2025-12-31` |
 
 ```
-CAGR = (38,068,000,000 / 29,654,000,000) ^ (1/3) − 1
-     = (1.284) ^ (0.333) − 1 = +8.7%
+CAGR = (38,068 / 29,654) ^ (1/3) − 1 = +8.7%
 ```
+
+**YoY:** $29.7B → $33.2B (+12%) → $34.9B (+5%) → $38.1B (+9%)
 
 ---
 
-## 4. Margin Volatility (Weight: 10%, inverse — lower is better)
+## 4. Net Income Growth — NEW in v3 (Weight: 10%)
 
 ```
-Op Margin = Operating Income / Revenue  (per year)
-Volatility = StdDev(all yearly Op Margins)
+NI CAGR = (NI_last / NI_first) ^ (1/(n−1)) − 1     (when both positive)
+        = +100%   (turnaround: loss → profit)
+        = −100%   (deterioration: profit → loss)
 ```
 
 ### EQNR
 
-| Year | Operating Income | Source | ÷ Revenue | Source | = Op Margin |
-|------|-----------------|--------|-----------|--------|-------------|
-| 2022 | 77,741,000,000 | `EQNR_income.csv → "Operating Income" → 2022-12-31` | ÷ 149,004,000,000 | `EQNR_income.csv → "Total Revenue" → 2022-12-31` | **52.2%** |
-| 2023 | 35,233,000,000 | `EQNR_income.csv → "Operating Income" → 2023-12-31` | ÷ 106,848,000,000 | `EQNR_income.csv → "Total Revenue" → 2023-12-31` | **33.0%** |
-| 2024 | 30,354,000,000 | `EQNR_income.csv → "Operating Income" → 2024-12-31` | ÷ 102,502,000,000 | `EQNR_income.csv → "Total Revenue" → 2024-12-31` | **29.6%** |
-| 2025 | 24,730,000,000 | `EQNR_income.csv → "Operating Income" → 2025-12-31` | ÷ 105,828,000,000 | `EQNR_income.csv → "Total Revenue" → 2025-12-31` | **23.4%** |
+| Year | Net Income | Source | YoY |
+|------|-----------|--------|-----|
+| 2022 | 28,746,000,000 | `EQNR_income.csv → "Net Income Common Stockholders" → 2022-12-31` | — |
+| 2023 | 11,885,000,000 | `→ 2023-12-31` | **−58.6%** |
+| 2024 | 8,806,000,000 | `→ 2024-12-31` | **−25.9%** |
+| 2025 | 5,043,000,000 | `→ 2025-12-31` | **−42.7%** |
 
 ```
-Mean = (52.2 + 33.0 + 29.6 + 23.4) / 4 = 34.6%
-StdDev = √[((52.2−34.6)² + (33.0−34.6)² + (29.6−34.6)² + (23.4−34.6)²) / 4]
-       = √[(309.8 + 2.6 + 25.0 + 125.4) / 4] = √115.7 = 10.8%
+Both positive: CAGR = (5,043 / 28,746) ^ (1/3) − 1 = −44.0%
 ```
 
-**EQNR Margin Volatility = 10.8%**
+**EQNR NI Growth = −44.0%** — Net income collapsed from $28.7B to $5.0B in 3 years.
 
 ### GEV
 
-| Year | Operating Income | Source | ÷ Revenue | Source | = Op Margin |
-|------|-----------------|--------|-----------|--------|-------------|
-| 2022 | −2,881,000,000 | `GEV_income.csv → "Operating Income" → 2022-12-31` | ÷ 29,654,000,000 | `GEV_income.csv → "Total Revenue" → 2022-12-31` | **−9.7%** |
-| 2023 | −923,000,000 | `GEV_income.csv → "Operating Income" → 2023-12-31` | ÷ 33,239,000,000 | `GEV_income.csv → "Total Revenue" → 2023-12-31` | **−2.8%** |
-| 2024 | 471,000,000 | `GEV_income.csv → "Operating Income" → 2024-12-31` | ÷ 34,935,000,000 | `GEV_income.csv → "Total Revenue" → 2024-12-31` | **1.3%** |
-| 2025 | 1,389,000,000 | `GEV_income.csv → "Operating Income" → 2025-12-31` | ÷ 38,068,000,000 | `GEV_income.csv → "Total Revenue" → 2025-12-31` | **3.7%** |
+| Year | Net Income | Source | YoY |
+|------|-----------|--------|-----|
+| 2022 | −2,736,000,000 | `GEV_income.csv → "Net Income Common Stockholders" → 2022-12-31` | — |
+| 2023 | −438,000,000 | `→ 2023-12-31` | losses shrinking |
+| 2024 | 1,552,000,000 | `→ 2024-12-31` | **turned profitable** |
+| 2025 | 4,884,000,000 | `→ 2025-12-31` | **+214.7%** |
 
 ```
-Mean = (−9.7 + (−2.8) + 1.3 + 3.7) / 4 = −1.9%
-StdDev = 5.8%
+Loss → Profit turnaround: capped at +100%
 ```
 
-**GEV Margin Volatility = 5.8%**
+**GEV NI Growth = +100%** (capped) — Went from −$2.7B loss to $4.9B profit.
+
+> This is the most dramatic difference between EQNR and GEV. EQNR's net income is in freefall (−44%/yr), GEV completed a full turnaround. The old v2 formula with only revenue growth couldn't capture this — revenue tells you the top line, but net income tells you the bottom line.
 
 ---
 
-## 5. Leverage — Net Debt / EBITDA (Weight: 10%, inverse)
+## 5. Leverage — Net Debt / EBITDA (Weight: 15%, EMA, inverse)
 
 ```
 Leverage = (Total Debt − Cash) / EBITDA
+Averaging: EMA     Direction: lower is better
 ```
 
 ### EQNR
 
-| Year | Total Debt | Source | − Cash | Source | = Net Debt | ÷ EBITDA | Source | = Leverage |
-|------|-----------|--------|--------|--------|-----------|----------|--------|-----------|
-| 2022 | 32,167,000,000 | `EQNR_balance.csv → "Total Debt" → 2022-12-31` | 9,438,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2022-12-31` | 22,729,000,000 | ÷ 86,266,000,000 | `EQNR_income.csv → "EBITDA" → 2022-12-31` | **0.26x** |
-| 2023 | 31,795,000,000 | `EQNR_balance.csv → "Total Debt" → 2023-12-31` | 8,070,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2023-12-31` | 23,725,000,000 | ÷ 49,587,000,000 | `EQNR_income.csv → "EBITDA" → 2023-12-31` | **0.48x** |
-| 2024 | 30,095,000,000 | `EQNR_balance.csv → "Total Debt" → 2024-12-31` | 5,903,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2024-12-31` | 24,192,000,000 | ÷ 41,949,000,000 | `EQNR_income.csv → "EBITDA" → 2024-12-31` | **0.58x** |
-| 2025 | 31,220,000,000 | `EQNR_balance.csv → "Total Debt" → 2025-12-31` | 5,036,000,000 | `EQNR_balance.csv → "Cash And Cash Equivalents" → 2025-12-31` | 26,184,000,000 | ÷ 38,393,000,000 | `EQNR_income.csv → "EBITDA" → 2025-12-31` | **0.68x** |
+| Year | Debt | Source | − Cash | Source | = Net Debt | ÷ EBITDA | Source | = Lev | × EMA |
+|------|------|--------|--------|--------|-----------|----------|--------|-------|-------|
+| 2022 | 32,167M | `EQNR_balance.csv → "Total Debt" → 2022` | 9,438M | `→ "Cash And Cash Equivalents" → 2022` | 22,729M | ÷ 86,266M | `EQNR_income.csv → "EBITDA" → 2022` | **0.26x** | ×10% |
+| 2023 | 31,795M | `→ 2023` | 8,070M | `→ 2023` | 23,725M | ÷ 49,587M | `→ 2023` | **0.48x** | ×17% |
+| 2024 | 30,095M | `→ 2024` | 5,903M | `→ 2024` | 24,192M | ÷ 41,949M | `→ 2024` | **0.58x** | ×28% |
+| 2025 | 31,220M | `→ 2025` | 5,036M | `→ 2025` | 26,184M | ÷ 38,393M | `→ 2025` | **0.68x** | ×46% |
 
-**EQNR Leverage Average = (0.26 + 0.48 + 0.58 + 0.68) / 4 = 0.50x**
+```
+v2 (SMA): 0.50x  →  v3 (EMA): 0.58x  ← rising leverage weighted more
+```
 
 ### GEV
 
-| Year | Total Debt | Source | − Cash | Source | = Net Debt | ÷ EBITDA | Source | = Leverage |
-|------|-----------|--------|--------|--------|-----------|----------|--------|-----------|
-| 2022 | 1,144,000,000 | `GEV_balance.csv → "Total Debt" → 2022-12-31` | 2,067,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2022-12-31` | −923,000,000 | ÷ −526,000,000 | `GEV_income.csv → "EBITDA" → 2022-12-31` | **1.75x** |
-| 2023 | 1,157,000,000 | `GEV_balance.csv → "Total Debt" → 2023-12-31` | 1,551,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2023-12-31` | −394,000,000 | ÷ 932,000,000 | `GEV_income.csv → "EBITDA" → 2023-12-31` | **−0.42x** |
-| 2024 | 1,043,000,000 | `GEV_balance.csv → "Total Debt" → 2024-12-31` | 8,205,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2024-12-31` | −7,162,000,000 | ÷ 1,643,000,000 | `GEV_income.csv → "EBITDA" → 2024-12-31` | **−4.36x** |
-| 2025 | 1,172,000,000 | `GEV_balance.csv → "Total Debt" → 2025-12-31` | 8,848,000,000 | `GEV_balance.csv → "Cash And Cash Equivalents" → 2025-12-31` | −7,676,000,000 | ÷ 2,242,000,000 | `GEV_income.csv → "EBITDA" → 2025-12-31` | **−3.43x** |
+| Year | Debt − Cash = Net Debt | ÷ EBITDA | = Lev | × EMA |
+|------|------------------------|----------|-------|-------|
+| 2022 | 1,144M − 2,067M = −923M | ÷ −526M | **1.75x** | ×10% |
+| 2023 | 1,157M − 1,551M = −394M | ÷ 932M | **−0.42x** | ×17% |
+| 2024 | 1,043M − 8,205M = −7,162M | ÷ 1,643M | **−4.36x** | ×28% |
+| 2025 | 1,172M − 8,848M = −7,676M | ÷ 2,242M | **−3.43x** | ×46% |
 
-**GEV Leverage Average = (1.75 + (−0.42) + (−4.36) + (−3.43)) / 4 = −1.62x** (net cash)
+```
+v2 (SMA): −1.61x  →  v3 (EMA): −2.67x  ← recent net cash position weighted more
+```
 
 ---
 
-## 6. Cash Quality — CFO / Net Income (Weight: 10%)
+## 6. Cash Quality — CFO / Net Income (Weight: 10%, EMA)
 
 ```
 Cash Quality = Operating Cash Flow / Net Income
+Averaging: EMA
 ```
 
 ### EQNR
 
-| Year | Operating CF | Source | ÷ Net Income | Source | = Ratio |
-|------|-------------|--------|-------------|--------|---------|
-| 2022 | 35,136,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2022-12-31` | 28,746,000,000 | `EQNR_income.csv → "Net Income Common Stockholders" → 2022-12-31` | **1.22x** |
-| 2023 | 29,257,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2023-12-31` | 11,885,000,000 | `EQNR_income.csv → "Net Income Common Stockholders" → 2023-12-31` | **2.46x** |
-| 2024 | 19,465,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2024-12-31` | 8,806,000,000 | `EQNR_income.csv → "Net Income Common Stockholders" → 2024-12-31` | **2.21x** |
-| 2025 | 19,971,000,000 | `EQNR_cashflow.csv → "Operating Cash Flow" → 2025-12-31` | 5,043,000,000 | `EQNR_income.csv → "Net Income Common Stockholders" → 2025-12-31` | **3.96x** |
+| Year | OCF | Source | ÷ Net Income | Source | = Ratio | × EMA |
+|------|-----|--------|-------------|--------|---------|-------|
+| 2022 | 35,136M | `EQNR_cashflow.csv → "Operating Cash Flow" → 2022` | 28,746M | `EQNR_income.csv → "Net Income Common Stockholders" → 2022` | **1.22x** | ×10% |
+| 2023 | 29,257M | `→ 2023` | 11,885M | `→ 2023` | **2.46x** | ×17% |
+| 2024 | 19,465M | `→ 2024` | 8,806M | `→ 2024` | **2.21x** | ×28% |
+| 2025 | 19,971M | `→ 2025` | 5,043M | `→ 2025` | **3.96x** | ×46% |
 
-**EQNR Cash Quality Average = (1.22 + 2.46 + 2.21 + 3.96) / 4 = 2.46x**
+```
+v2 (SMA): 2.46x  →  v3 (EMA): 2.96x
+```
 
 ### GEV
 
-| Year | Operating CF | Source | ÷ Net Income | Source | = Ratio |
-|------|-------------|--------|-------------|--------|---------|
-| 2022 | −114,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2022-12-31` | −2,736,000,000 | `GEV_income.csv → "Net Income Common Stockholders" → 2022-12-31` | **0.04x** |
-| 2023 | 1,186,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2023-12-31` | −438,000,000 | `GEV_income.csv → "Net Income Common Stockholders" → 2023-12-31` | **−2.71x** |
-| 2024 | 2,583,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2024-12-31` | 1,552,000,000 | `GEV_income.csv → "Net Income Common Stockholders" → 2024-12-31` | **1.66x** |
-| 2025 | 4,987,000,000 | `GEV_cashflow.csv → "Operating Cash Flow" → 2025-12-31` | 4,884,000,000 | `GEV_income.csv → "Net Income Common Stockholders" → 2025-12-31` | **1.02x** |
+| Year | OCF ÷ Net Income | = Ratio | × EMA |
+|------|-------------------|---------|-------|
+| 2022 | −114M ÷ −2,736M | **0.04x** | ×10% |
+| 2023 | 1,186M ÷ −438M | **−2.71x** | ×17% |
+| 2024 | 2,583M ÷ 1,552M | **1.66x** | ×28% |
+| 2025 | 4,987M ÷ 4,884M | **1.02x** | ×46% |
 
-**GEV Cash Quality Average = (0.04 + (−2.71) + 1.66 + 1.02) / 4 = 0.00x**
+```
+v2 (SMA): 0.00x  →  v3 (EMA): 0.48x  ← recent healthy years weighted more
+```
 
 ---
 
-## 7. Interest Coverage (Weight: 10%)
+## 7. Margin Volatility (Weight: 10%, inverse, SMA — unchanged)
 
 ```
-Interest Coverage = EBIT / Interest Expense
+Op Margin = Operating Income / Revenue  (per year)
+Volatility = StdDev(all yearly margins)         Direction: lower is better
 ```
 
 ### EQNR
 
-| Year | EBIT | Source | ÷ Interest Expense | Source | = Coverage |
-|------|------|--------|---------------------|--------|-----------|
-| 2022 | 79,533,000,000 | `EQNR_income.csv → "EBIT" → 2022-12-31` | 929,000,000 | `EQNR_income.csv → "Interest Expense" → 2022-12-31` | **85.6x** |
-| 2023 | 39,006,000,000 | `EQNR_income.csv → "EBIT" → 2023-12-31` | 1,122,000,000 | `EQNR_income.csv → "Interest Expense" → 2023-12-31` | **34.8x** |
-| 2024 | 32,043,000,000 | `EQNR_income.csv → "EBIT" → 2024-12-31` | 1,057,000,000 | `EQNR_income.csv → "Interest Expense" → 2024-12-31` | **30.3x** |
-| 2025 | 25,920,000,000 | `EQNR_income.csv → "EBIT" → 2025-12-31` | 832,000,000 | `EQNR_income.csv → "Interest Expense" → 2025-12-31` | **31.2x** |
+| Year | Op Income ÷ Revenue | = Margin | Source |
+|------|---------------------|----------|--------|
+| 2022 | 77,741M ÷ 149,004M | **52.2%** | `EQNR_income.csv → "Operating Income" ÷ "Total Revenue" → 2022` |
+| 2023 | 35,233M ÷ 106,848M | **33.0%** | `→ 2023` |
+| 2024 | 30,354M ÷ 102,502M | **29.6%** | `→ 2024` |
+| 2025 | 24,730M ÷ 105,828M | **23.4%** | `→ 2025` |
 
-**EQNR Interest Coverage Average = (85.6 + 34.8 + 30.3 + 31.2) / 4 = 45.5x**
+**Volatility = StdDev(52.2, 33.0, 29.6, 23.4) = 10.8%**
 
 ### GEV
 
-| Year | EBIT | Source | ÷ Interest Expense | Source | = Coverage |
-|------|------|--------|---------------------|--------|-----------|
-| 2022 | −2,323,000,000 | `GEV_income.csv → "EBIT" → 2022-12-31` | 151,000,000 | `GEV_income.csv → "Interest Expense" → 2022-12-31` | **−15.4x** |
-| 2023 | −32,000,000 | `GEV_income.csv → "EBIT" → 2023-12-31` | 98,000,000 | `GEV_income.csv → "Interest Expense" → 2023-12-31` | **−0.3x** |
-| 2024 | 471,000,000 | `GEV_income.csv → "EBIT" → 2024-12-31` | NaN | `GEV_income.csv → "Interest Expense" → 2024-12-31` | **N/A** |
-| 2025 | 1,389,000,000 | `GEV_income.csv → "EBIT" → 2025-12-31` | NaN | `GEV_income.csv → "Interest Expense" → 2025-12-31` | **N/A** |
+| Year | Op Income ÷ Revenue | = Margin |
+|------|---------------------|----------|
+| 2022 | −2,881M ÷ 29,654M | **−9.7%** |
+| 2023 | −923M ÷ 33,239M | **−2.8%** |
+| 2024 | 471M ÷ 34,935M | **1.3%** |
+| 2025 | 1,389M ÷ 38,068M | **3.6%** |
 
-**GEV Interest Coverage: only 2 years calculable, both negative (pre-turnaround)**
+**Volatility = StdDev(−9.7, −2.8, 1.3, 3.6) = 5.1%**
 
 ---
 
-## 8. Operating Margin Trend (Weight: 10%)
+## 8. Margin Trend (Weight: 10%, SMA — unchanged)
 
 ```
 Trend = Linear regression slope through yearly Operating Margins
 ```
 
-Uses the Operating Margins calculated in Section 4:
-
-### EQNR
-
-Margins: 52.2% → 33.0% → 29.6% → 23.4% (indexed as x = 0, 1, 2, 3)
+### EQNR: 52.2% → 33.0% → 29.6% → 23.4%
 
 ```
-Linear regression: y = a + bx
-b = [n·Σxy − Σx·Σy] / [n·Σx² − (Σx)²]
-
-Σx = 0+1+2+3 = 6        Σy = 52.2+33.0+29.6+23.4 = 138.2
-Σxy = 0×52.2 + 1×33.0 + 2×29.6 + 3×23.4 = 0 + 33.0 + 59.2 + 70.2 = 162.4
-Σx² = 0+1+4+9 = 14      n = 4
-
-b = (4×162.4 − 6×138.2) / (4×14 − 36) = (649.6 − 829.2) / (56 − 36)
-  = −179.6 / 20 = −8.98% per year
+Slope = −9.0% per year  (margins compressing fast)
 ```
 
-**EQNR Margin Trend = −9.0%/year** (margins declining fast)
-
-### GEV
-
-Margins: −9.7% → −2.8% → 1.3% → 3.7%
+### GEV: −9.7% → −2.8% → 1.3% → 3.6%
 
 ```
-Σx = 6   Σy = −7.5   Σxy = 0×(−9.7) + 1×(−2.8) + 2×1.3 + 3×3.7 = −2.8 + 2.6 + 11.1 = 10.9
-b = (4×10.9 − 6×(−7.5)) / 20 = (43.6 + 45.0) / 20 = 88.6 / 20 = +4.43% per year
+Slope = +4.4% per year  (margins expanding)
 ```
-
-**GEV Margin Trend = +4.4%/year** (margins expanding)
 
 ---
 
-## 9. Final Quality Score Assembly
+## 9. Final Quality Score Assembly (v3)
 
-All 8 metrics computed above are combined into a single Quality Score. The process:
-
-1. Each metric's raw value is **percentile-ranked** among all ~105 companies (0th = worst, 100th = best)
-2. For inverse metrics (leverage, volatility), the rank is flipped: lowest raw value → highest percentile
-3. Each percentile is multiplied by its **weight**
-4. All weighted percentiles are summed → **Quality Score (0–100)**
-
-### EQNR — Quality Score = 59.4
-
-| # | Metric | Raw Value | Pctl | × Weight | = Contribution | Ref |
-|---|--------|-----------|------|----------|----------------|-----|
-| §1 | ROIC | 46.5% | 97.6th | × 20% | **19.5** | Section 1 |
-| §2 | FCF Margin | 15.5% | 67.3th | × 15% | **10.1** | Section 2 |
-| §3 | Revenue Growth | 4.9% | 22.7th | × 15% | **3.4** | Section 3 |
-| §4 | Margin Volatility *(inv)* | 10.0% | 14.4th | × 10% | **1.4** | Section 4 |
-| §5 | Leverage *(inv)* | 0.47x | 76.2th | × 10% | **7.6** | Section 5 |
-| §6 | Cash Quality | 2.24x | 74.3th | × 10% | **7.4** | Section 6 |
-| §7 | Interest Coverage | 46.7x | 90.2th | × 10% | **9.0** | Section 7 |
-| §8 | Margin Trend | −4.2% | 8.3th | × 10% | **0.8** | Section 8 |
-| | | | | **Total** | **59.4** | |
+**New formula — 8 metrics, EMA-weighted, no interest coverage:**
 
 ```
-Quality Score = 19.5 + 10.1 + 3.4 + 1.4 + 7.6 + 7.4 + 9.0 + 0.8 = 59.4
+Quality Score = Σ(percentile_rank × weight) for each metric
 ```
 
-**What pulls EQNR up:** ROIC (97.6th percentile — near the top of all companies) and Interest Coverage (90.2th). These are the backward-looking metrics inflated by 2022.
+Each metric's value is percentile-ranked among all ~105 companies (0th = worst, 100th = best).
 
-**What pulls EQNR down:** Margin Trend (8.3th — nearly worst in the dataset, margins declining −4.2%/year), Revenue Growth (22.7th — revenue is shrinking), and Margin Volatility (14.4th — highly unstable margins).
+### EQNR — Quality Score
+
+| # | Metric | Raw (v3) | vs v2 | Pctl | × Weight | = Contribution |
+|---|--------|----------|-------|------|----------|----------------|
+| §1 | ROIC **(EMA)** | 37.2% | ↓ was 45.4% | ~92nd | × 20% | **~18.4** |
+| §2 | FCF Margin **(EMA)** | 9.2% | ↓ was 12.0% | ~60th | × 15% | **~9.0** |
+| §3 | Revenue Growth | −10.8% | same | ~8th | × 10% | **~0.8** |
+| §4 | **NI Growth (NEW)** | **−44.0%** | *didn't exist* | ~3rd | × 10% | **~0.3** |
+| §5 | Leverage **(EMA, inv)** | 0.58x | ↑ was 0.50x | ~74th | × 15% | **~11.1** |
+| §6 | Margin Volatility *(inv)* | 10.8% | same | ~14th | × 10% | **~1.4** |
+| §7 | Cash Quality **(EMA)** | 2.96x | ↑ was 2.46x | ~78th | × 10% | **~7.8** |
+| §8 | Margin Trend | −9.0%/yr | same | ~5th | × 10% | **~0.5** |
+| | | | | | **Total** | **~49** |
+
+> **v3 score ≈ 49** (down from v2's 59). The net income growth metric (−44%, 3rd percentile) is devastating — it exposes what revenue growth alone couldn't: EQNR's bottom line is collapsing. EMA also deflates the 2022-inflated ROIC and FCF.
+
+### GEV — Quality Score
+
+| # | Metric | Raw (v3) | vs v2 | Pctl | × Weight | = Contribution |
+|---|--------|----------|-------|------|----------|----------------|
+| §1 | ROIC **(EMA)** | 9.7% | ↑ was 0.5% | ~25th | × 20% | **~5.0** |
+| §2 | FCF Margin **(EMA)** | 5.8% | ↑ was 3.5% | ~38th | × 15% | **~5.7** |
+| §3 | Revenue Growth | +8.7% | same | ~35th | × 10% | **~3.5** |
+| §4 | **NI Growth (NEW)** | **+100%** | *didn't exist* | ~98th | × 10% | **~9.8** |
+| §5 | Leverage **(EMA, inv)** | −2.67x | ↑ was −1.61x | ~97th | × 15% | **~14.6** |
+| §6 | Margin Volatility *(inv)* | 5.1% | same | ~32nd | × 10% | **~3.2** |
+| §7 | Cash Quality **(EMA)** | 0.48x | ↑ was 0.00x | ~15th | × 10% | **~1.5** |
+| §8 | Margin Trend | +4.4%/yr | same | ~92nd | × 10% | **~9.2** |
+| | | | | | **Total** | **~53** |
+
+> **v3 score ≈ 53** (up from v2's 34). The turnaround story is now properly captured: NI Growth at +100% (98th percentile) adds 9.8 points. EMA boosts ROIC from 0.5% → 9.7%, FCF from 3.5% → 5.8%.
 
 ---
 
-### GEV — Quality Score = 33.6
+## v2 → v3 Impact Summary
 
-| # | Metric | Raw Value | Pctl | × Weight | = Contribution | Ref |
-|---|--------|-----------|------|----------|----------------|-----|
-| §1 | ROIC | 1.0% | 3.3th | × 20% | **0.7** | Section 1 |
-| §2 | FCF Margin | 3.5% | 31.7th | × 15% | **4.8** | Section 2 |
-| §3 | Revenue Growth | 8.7% | 35.1th | × 15% | **5.3** | Section 3 |
-| §4 | Margin Volatility *(inv)* | 5.9% | 27.9th | × 10% | **2.8** | Section 4 |
-| §5 | Leverage *(inv)* | −1.61x | 96.7th | × 10% | **9.7** | Section 5 |
-| §6 | Cash Quality | 0.00x | 9.5th | × 10% | **1.0** | Section 6 |
-| §7 | Interest Coverage | −14.2x | 3.4th | × 10% | **0.3** | Section 7 |
-| §8 | Margin Trend | +4.4% | 91.7th | × 10% | **9.2** | Section 8 |
-| | | | | **Total** | **33.6** | |
+| Metric | EQNR v2 → v3 | GEV v2 → v3 | What changed |
+|--------|---------------|-------------|--------------|
+| ROIC | 45.4% → **37.2%** | 0.5% → **9.7%** | EMA deflates peaks, boosts recency |
+| FCF | 12.0% → **9.2%** | 3.5% → **5.8%** | EMA deflates peaks, boosts recency |
+| Revenue Growth | −10.8% | +8.7% | Unchanged (CAGR) |
+| **NI Growth** | — → **−44.0%** | — → **+100%** | **NEW: biggest differentiator** |
+| Leverage | 0.50x → **0.58x** | −1.61x → **−2.67x** | EMA shows current leverage better |
+| Cash Quality | 2.46x → **2.96x** | 0.00x → **0.48x** | EMA reduces noise from loss years |
+| Margin Vol | 10.8% | 5.1% | Unchanged |
+| Margin Trend | −9.0%/yr | +4.4%/yr | Unchanged |
+| **Quality Score** | **59 → ~49** | **34 → ~53** | **Gap closed: GEV now scores HIGHER** |
 
-```
-Quality Score = 0.7 + 4.8 + 5.3 + 2.8 + 9.7 + 1.0 + 0.3 + 9.2 = 33.6
-```
+### The v3 Verdict
 
-**What pulls GEV up:** Leverage (96.7th — net cash, almost no debt) and Margin Trend (91.7th — one of the fastest margin improvers in the dataset).
+In v2, EQNR scored 59 vs GEV's 34 — a 25-point gap driven by EQNR's inflated historical averages. In v3, **GEV overtakes EQNR** (~53 vs ~49). The three changes that made this happen:
 
-**What pulls GEV down:** ROIC (3.3th — near the bottom due to 2022-2023 losses) and Interest Coverage (3.4th — negative EBIT in early years). These backward-looking metrics haven't caught up to the turnaround yet.
+1. **EMA** deflated EQNR's 2022 windfall year (−8 pts on ROIC alone) while boosting GEV's recent profitability
+2. **Net Income Growth** is the killer metric: EQNR at −44%/yr (3rd percentile) vs GEV at +100% (98th percentile) — a 9.5 point swing
+3. **Removing Interest Coverage** eliminated a noisy metric that randomly helped/hurt based on data availability
 
----
-
-### The Paradox Explained
-
-| | EQNR | GEV |
-|---|------|-----|
-| Quality Score | **59.4** (higher) | **33.6** (lower) |
-| Technical Rating | **Sell** | **Buy** |
-| The story | Peak-cycle metrics declining | Turnaround metrics improving |
-
-EQNR scores higher because its 4-year averages are still dominated by the 2022 windfall. But the *direction* of every metric is downward. GEV scores lower because its 4-year averages include two loss years — but the *direction* of every metric is upward. The technical indicators see the price trend and correctly flag EQNR as declining and GEV as ascending.
-
-**Lesson:** Quality scores are a snapshot of averaged history. Always check the *trend* (margin trend, revenue growth) and compare with technical signals to see where the company is heading, not just where it's been.
+The quality score now agrees with the technical indicators: EQNR is declining, GEV is ascending.
 
 ---
 
 ## Cell Reference Index
 
-Quick lookup — which file/row/column for each input:
-
 | Variable | File | Row Name | Column |
 |----------|------|----------|--------|
 | Revenue | `{T}_income.csv` | `Total Revenue` | `{YYYY}-12-31` |
 | Operating Income | `{T}_income.csv` | `Operating Income` | `{YYYY}-12-31` |
-| EBIT | `{T}_income.csv` | `EBIT` | `{YYYY}-12-31` |
 | EBITDA | `{T}_income.csv` | `EBITDA` | `{YYYY}-12-31` |
 | Net Income | `{T}_income.csv` | `Net Income Common Stockholders` | `{YYYY}-12-31` |
-| Interest Expense | `{T}_income.csv` | `Interest Expense` | `{YYYY}-12-31` |
 | Tax Rate | `{T}_income.csv` | `Tax Rate For Calcs` | `{YYYY}-12-31` |
 | Total Equity | `{T}_balance.csv` | `Total Equity Gross Minority Interest` | `{YYYY}-12-31` |
 | Total Debt | `{T}_balance.csv` | `Total Debt` | `{YYYY}-12-31` |
@@ -418,8 +393,6 @@ Quick lookup — which file/row/column for each input:
 | Operating Cash Flow | `{T}_cashflow.csv` | `Operating Cash Flow` | `{YYYY}-12-31` |
 | Capital Expenditure | `{T}_cashflow.csv` | `Capital Expenditure` | `{YYYY}-12-31` |
 
-Where `{T}` = ticker (EQNR, GEV, etc.) and `{YYYY}` = fiscal year.
-
 ---
 
-*All values sourced from yfinance financial statements. Generated from EQNR and GEV data (fiscal years 2022–2025).*
+*Quality Score v3 — EMA + Net Income Growth. Generated from EQNR and GEV financial statements (2022–2025).*

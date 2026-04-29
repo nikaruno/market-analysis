@@ -12,10 +12,10 @@
     "roic": 0.20,
     "fcf": 0.15,
     "cash_quality": 0.10,
-    "leverage": 0.10,
-    "growth": 0.15,
+    "leverage": 0.15,
+    "revenue_growth": 0.10,
+    "income_growth": 0.10,
     "margin_trend": 0.10,
-    "interest_coverage": 0.10,
     "margin_volatility": 0.10
   }
 }

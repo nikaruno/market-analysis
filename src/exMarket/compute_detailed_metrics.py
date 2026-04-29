@@ -8,6 +8,22 @@ OUTPUT_PATH = Path("data/fundamentals/company_metrics.csv")
 
 MIN_YEARS = 3
 
+def ema_mean(series):
+    """Exponential moving average — recent years weighted more heavily.
+    With span=n (number of values), alpha = 2/(n+1).
+    For 4 years: weights are approximately 10%, 17%, 28%, 46% (oldest→newest).
+    Series must be in chronological order (oldest first).
+    """
+    vals = series.dropna()
+    if len(vals) == 0:
+        return np.nan
+    if len(vals) == 1:
+        return vals.iloc[0]
+    n = len(vals)
+    alpha = 2.0 / (n + 1)
+    weights = np.array([(1 - alpha) ** (n - 1 - i) for i in range(n)])
+    return np.average(vals.values, weights=weights)
+
 # Key variations for different financial statement line items
 CFO_KEYS = ["Total Cash From Operating Activities", "Cash Flow From Continuing Operating Activities", 
             "Net Cash Provided by Operating Activities", "Operating Cash Flow"]
@@ -30,17 +46,30 @@ def get_row(df, names):
     return None
 
 def load_statements(ticker):
-    """Load financial statements for a ticker."""
-    # Sanitize ticker for filename (same as download_detailed_fundamentals)
+    """Load financial statements for a ticker.
+    Handles safe filenames where dots are replaced with underscores
+    (e.g., ASELS.IS → ASELS_IS_income.csv).
+    """
     safe_ticker = ticker.replace('.', '_')
-    try:
-        income = pd.read_csv(RAW_DIR / f"{safe_ticker}_income.csv", index_col=0)
-        balance = pd.read_csv(RAW_DIR / f"{safe_ticker}_balance.csv", index_col=0)
-        cashflow = pd.read_csv(RAW_DIR / f"{safe_ticker}_cashflow.csv", index_col=0)
-        return income, balance, cashflow
-    except FileNotFoundError as e:
-        print(f"  [WARN] Missing file for {ticker} (looked for {safe_ticker}_*.csv): {e}")
-        return None, None, None
+    
+    # Try both: original ticker and safe (dot→underscore) version
+    for t in [ticker, safe_ticker]:
+        income_path = RAW_DIR / f"{t}_income.csv"
+        balance_path = RAW_DIR / f"{t}_balance.csv"
+        cashflow_path = RAW_DIR / f"{t}_cashflow.csv"
+        
+        if income_path.exists() and balance_path.exists() and cashflow_path.exists():
+            try:
+                income = pd.read_csv(income_path, index_col=0)
+                balance = pd.read_csv(balance_path, index_col=0)
+                cashflow = pd.read_csv(cashflow_path, index_col=0)
+                return income, balance, cashflow
+            except Exception as e:
+                print(f"  [WARN] Error reading files for {ticker}: {e}")
+                return None, None, None
+    
+    print(f"  [WARN] Missing files for {ticker} (tried {ticker} and {safe_ticker})")
+    return None, None, None
 
 def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
     """Compute fundamental quality metrics for a company."""
@@ -101,24 +130,44 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         invested_capital = equity + debt - cash
         invested_capital = invested_capital.replace(0, np.nan)
         roic = nopat / invested_capital
-        roic_avg = roic.mean()
+        roic_avg = ema_mean(roic)  # EMA: recent years weighted more
         
         op_margin = op_income / revenue
         op_margin_trend = np.polyfit(range(years_to_use), op_margin, 1)[0]
         
         # CASH FLOW
         fcf = cfo - capex.abs()
-        fcf_margin = (fcf / revenue).mean()
-        cfo_to_ni = (cfo / net_income).mean()
+        fcf_margin = ema_mean(fcf / revenue)  # EMA
+        cfo_to_ni = ema_mean(cfo / net_income)  # EMA
         
         # BALANCE SHEET
         net_debt = debt - cash
-        net_debt_ebitda = (net_debt / ebitda).mean()
-        interest_coverage = (op_income / interest.abs()).replace([np.inf, -np.inf], np.nan).mean()
+        net_debt_ebitda = ema_mean(net_debt / ebitda)  # EMA
+        # Note: interest_coverage removed — too noisy (NaN when interest=0, 
+        # extreme values -246x to +303x, redundant with leverage)
         
         # DURABILITY
         revenue_cagr = (revenue.iloc[-1] / revenue.iloc[0]) ** (1/(years_to_use-1)) - 1
         margin_volatility = op_margin.std()
+        
+        # NET INCOME GROWTH
+        # Use CAGR when first and last are both positive; otherwise use average YoY growth
+        ni_first = net_income.iloc[0]
+        ni_last = net_income.iloc[-1]
+        if ni_first > 0 and ni_last > 0:
+            ni_cagr = (ni_last / ni_first) ** (1/(years_to_use-1)) - 1
+        elif ni_first < 0 and ni_last > 0:
+            # Turnaround: went from loss to profit — big positive signal
+            ni_cagr = 1.0  # cap at 100% growth
+        elif ni_first > 0 and ni_last < 0:
+            # Deterioration: went from profit to loss — negative signal
+            ni_cagr = -1.0  # cap at -100%
+        else:
+            # Both negative — compute if losses are shrinking
+            if abs(ni_last) < abs(ni_first):
+                ni_cagr = 0.5  # losses shrinking, mildly positive
+            else:
+                ni_cagr = -0.5  # losses growing
         
         return {
             "ticker": ticker,
@@ -130,8 +179,8 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
             "fcf_margin": fcf_margin,
             "cfo_to_ni": cfo_to_ni,
             "net_debt_ebitda": net_debt_ebitda,
-            "interest_coverage": interest_coverage,
             "revenue_cagr": revenue_cagr,
+            "ni_cagr": ni_cagr,
             "margin_volatility": margin_volatility
         }
         
@@ -158,12 +207,35 @@ def main():
     success_count = 0
     fail_count = 0
     
+    # Load sectors.json for region info if available
+    sectors_regions = {}
+    sectors_path = Path("sectors.json")
+    if sectors_path.exists():
+        import json
+        with open(sectors_path, 'r') as f:
+            sectors_data = json.load(f)
+        for key, info in sectors_data.get("sectors", {}).items():
+            region = info.get("region", "global")
+            sectors_regions[key] = region
+    
     for idx, row in universe_df.iterrows():
         ticker = row['ticker']
         category = row.get('category', None)
-        region = row.get('region', 'global')
         
-        print(f"\n[{idx+1}/{len(universe_df)}] Computing metrics for {ticker} ({category})...")
+        # Determine region: from meta file, sectors.json, or default
+        region = "global"
+        meta_path = RAW_DIR / f"{ticker}_meta.json"
+        if meta_path.exists():
+            import json
+            with open(meta_path, 'r') as f:
+                meta = json.load(f)
+            region = meta.get("region", "global")
+        elif category and category in sectors_regions:
+            region = sectors_regions[category]
+        elif category and category.startswith("bist"):
+            region = "turkey"
+        
+        print(f"\n[{idx+1}/{len(universe_df)}] Computing metrics for {ticker} ({category}, {region})...")
         
         metrics = compute_metrics(ticker, category, region=region)
         
