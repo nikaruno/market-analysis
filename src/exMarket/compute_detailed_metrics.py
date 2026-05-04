@@ -8,6 +8,15 @@ OUTPUT_PATH = Path("data/fundamentals/company_metrics.csv")
 
 MIN_YEARS = 3
 
+# FX conversion for BIST stocks. Imported lazily so failures don't kill the module.
+try:
+    import fx_rates  # type: ignore
+    _FX_AVAILABLE = True
+except Exception as _e:  # pragma: no cover
+    print(f"  [WARN] fx_rates module not available: {_e}")
+    fx_rates = None
+    _FX_AVAILABLE = False
+
 def ema_mean(series):
     """Exponential moving average — recent years weighted more heavily.
     With span=n (number of values), alpha = 2/(n+1).
@@ -83,6 +92,33 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         income = income.iloc[:, ::-1]
         balance = balance.iloc[:, ::-1]
         cashflow = cashflow.iloc[:, ::-1]
+
+        # ---- FX CONVERSION (BIST → USD) -------------------------------------
+        # Turkish stocks report in TRY. To make ROIC/FCF/growth comparable to
+        # US peers — and especially to remove the inflation distortion from
+        # CAGR metrics — we convert statements to USD before computing.
+        #   - Income statement & cash flow → divide each column by yearly-avg USD/TRY
+        #     (these are flows accumulated through the year)
+        #   - Balance sheet → divide each column by USD/TRY at the period-end date
+        #     (these are point-in-time stock values)
+        # Margin ratios are unit-free and unaffected by conversion. Growth ratios
+        # (CAGR) are the main beneficiary.
+        currency_used = "USD" if region != "turkey" else "USD"  # default USD label
+        if region == "turkey" and _FX_AVAILABLE:
+            try:
+                if fx_rates.is_available():
+                    income   = fx_rates.convert_statement_columns(income,   "yearly_avg")
+                    cashflow = fx_rates.convert_statement_columns(cashflow, "yearly_avg")
+                    balance  = fx_rates.convert_statement_columns(balance,  "period_end")
+                    currency_used = "USD (from TRY)"
+                    print(f"  ✓ FX-converted TRY → USD")
+                else:
+                    currency_used = "TRY (FX unavailable)"
+                    print(f"  [WARN] FX rates unavailable; metrics will be in TRY (not comparable to USD peers)")
+            except Exception as fxe:
+                currency_used = "TRY (FX failed)"
+                print(f"  [WARN] FX conversion failed for {ticker}: {fxe}")
+        # ---------------------------------------------------------------------
         
         # Check available years
         years_available = min(income.shape[1], balance.shape[1], cashflow.shape[1])
@@ -173,6 +209,7 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
             "ticker": ticker,
             "category": category,
             "region": region or "global",
+            "currency": currency_used if region == "turkey" else "USD",
             "years_used": years_to_use,
             "roic_avg": roic_avg,
             "op_margin_trend": op_margin_trend,

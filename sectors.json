@@ -54,7 +54,7 @@
       "enabled": true,
       "type": "manual",
       "region": "turkey",
-      "tickers": ["TOASO.IS", "FROTO.IS", "OTKAR.IS", "EREGL.IS", "TUPRS.IS", "ASELS.IS", "KRDMD.IS", "BRISA.IS"]
+      "tickers": ["TOASO.IS", "FROTO.IS", "OTKAR.IS", "EREGL.IS", "TUPRS.IS", "ASELS.IS", "KRDMD.IS", "BRISA.IS", "AYGAZ.IS"]
     },
     "bist-banks": {
       "name": "BIST Banks",
@@ -68,7 +68,7 @@
       "enabled": true,
       "type": "manual",
       "region": "turkey",
-      "tickers": ["ENKAI.IS", "AKENR.IS", "ODAS.IS", "AKSEN.IS"]
+      "tickers": ["ENKAI.IS", "AKENR.IS", "ODAS.IS", "AKSEN.IS", "ASTOR.IS", "AKFYE.IS"]
     },
     "bist-consumer": {
       "name": "BIST Consumer",

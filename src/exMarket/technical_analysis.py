@@ -15,6 +15,15 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
 
+# FX conversion for BIST stocks (lazy import — failures don't kill the module).
+try:
+    import fx_rates  # type: ignore
+    _FX_AVAILABLE = True
+except Exception as _e:  # pragma: no cover
+    print(f"  [WARN] fx_rates module not available in technical_analysis: {_e}")
+    fx_rates = None
+    _FX_AVAILABLE = False
+
 # Paths
 SCORES_PATH = Path("data/fundamentals/absolute_scores.csv")
 OUTPUT_PATH = Path("data/technical_analysis.csv")
@@ -425,6 +434,60 @@ def score_to_100(score_neg1_to_1):
     return (score_neg1_to_1 + 1) * 50
 
 
+def _compute_ratings_only(df):
+    """
+    Compute just the TradingView-style voting ratings (MA + Oscillator) from
+    an OHLCV DataFrame. Returns a dict with the rating-related fields, or
+    None if data is insufficient.
+
+    Used to compute a secondary 'USD-converted' rating for BIST stocks
+    without re-downloading prices.
+    """
+    if df is None or df.empty or len(df) < 50:
+        return None
+
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+
+    close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    volume = df["Volume"]
+
+    try:
+        ma_score, ma_votes = rate_moving_averages(close, high, low, volume)
+        osc_score, osc_votes = rate_oscillators(close, high, low, volume)
+    except Exception as e:
+        print(f"    [WARN] Rating calc failed: {e}")
+        return None
+
+    overall_score = (ma_score + osc_score) / 2
+
+    ma_buy = sum(1 for v in ma_votes.values() if v > 0)
+    ma_sell = sum(1 for v in ma_votes.values() if v < 0)
+    osc_buy = sum(1 for v in osc_votes.values() if v > 0)
+    osc_sell = sum(1 for v in osc_votes.values() if v < 0)
+    total_buy = ma_buy + osc_buy
+    total_sell = ma_sell + osc_sell
+    total_neutral = (len(ma_votes) + len(osc_votes)) - total_buy - total_sell
+
+    return {
+        "ma_rating": ma_score,
+        "osc_rating": osc_score,
+        "overall_rating": overall_score,
+        "technical_score": score_to_100(overall_score),
+        "technical_rating": compute_technical_rating(overall_score),
+        "ma_buy": ma_buy,
+        "ma_sell": ma_sell,
+        "osc_buy": osc_buy,
+        "osc_sell": osc_sell,
+        "total_buy": total_buy,
+        "total_sell": total_sell,
+        "total_neutral": total_neutral,
+    }
+
+
 # ============================================================================
 # MAIN SIGNAL FUNCTION
 # ============================================================================
@@ -552,7 +615,38 @@ def get_technical_signals(ticker, lookback_days=LOOKBACK_DAYS):
             'total_sell': sell_count,
             'total_neutral': neutral_count,
         }
-        
+
+        # ---- Dual rating for BIST: also compute USD-converted ratings -------
+        # The native (TRY) rating above is the primary one — TradingView shows
+        # BIST charts in TRY too, and TRY depreciation distorts USD MAs heavily.
+        # The USD rating is provided as a secondary signal so a USD-based
+        # investor can see "this stock is up in TRY but flat/down in USD".
+        is_bist = ticker.upper().endswith(".IS")
+        if is_bist and _FX_AVAILABLE:
+            try:
+                if fx_rates.is_available():
+                    df_usd = fx_rates.convert_ohlcv(df)
+                    usd_ratings = _compute_ratings_only(df_usd)
+                    if usd_ratings is not None:
+                        for k, v in usd_ratings.items():
+                            current[f"{k}_usd"] = v
+                        current["currency"] = "TRY"  # primary is TRY
+                        current["has_usd_rating"] = True
+                        print(f"    + USD rating: "
+                              f"{usd_ratings['technical_rating']} "
+                              f"({usd_ratings['technical_score']:.0f})")
+                    else:
+                        current["has_usd_rating"] = False
+                else:
+                    current["has_usd_rating"] = False
+            except Exception as fxe:
+                print(f"    [WARN] USD rating failed for {ticker}: {fxe}")
+                current["has_usd_rating"] = False
+        else:
+            current["currency"] = "USD"
+            current["has_usd_rating"] = False
+        # ---------------------------------------------------------------------
+
         return current
         
     except Exception as e:

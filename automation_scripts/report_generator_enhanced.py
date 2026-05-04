@@ -135,7 +135,10 @@ def generate_report():
         
         # BIST section
         if len(bist_scores) > 0:
-            lines.append("### 🇹🇷 BIST Stocks (Borsa Istanbul — TL)")
+            lines.append("### 🇹🇷 BIST Stocks (Borsa Istanbul — fundamentals in USD)")
+            lines.append("")
+            lines.append("*Quality metrics computed on USD-converted statements for fair comparison with US peers. "
+                         "Technical analysis uses native TL prices (see Section 3).*")
             lines.append("")
             lines.append("| # | Ticker | Sector | Quality | ROIC | FCF % | Growth |")
             lines.append("|---|--------|--------|---------|------|-------|--------|")
@@ -237,7 +240,33 @@ def generate_report():
             emoji = "🟢" if "Buy" in rating else ("🔴" if "Sell" in rating else "🟡")
             lines.append(f"- {emoji} {rating}: {count} stocks")
         lines.append("")
-        
+
+        # BIST dual rating (TL primary, USD secondary)
+        if 'technical_score_usd' in tech_df.columns:
+            bist_tech = tech_df[
+                (tech_df['ticker'].str.upper().str.endswith('.IS')) &
+                (tech_df['technical_score_usd'].notna())
+            ]
+            if len(bist_tech) > 0:
+                lines.append("**🇹🇷 BIST Dual Rating — TL (primary) vs USD (secondary):**")
+                lines.append("")
+                lines.append("*USD ratings tend to be lower because TRY depreciation pulls "
+                             "moving-average voters toward Sell. The TL view matches "
+                             "TradingView; the USD view shows what a USD-based investor sees.*")
+                lines.append("")
+                lines.append("| Ticker | TL Score | TL Rating | USD Score | USD Rating | Δ |")
+                lines.append("|--------|----------|-----------|-----------|------------|---|")
+                bist_sorted = bist_tech.sort_values('technical_score', ascending=False)
+                for _, row in bist_sorted.iterrows():
+                    tl_score = row['technical_score']
+                    tl_rating = row['technical_rating']
+                    usd_score = row['technical_score_usd']
+                    usd_rating = row.get('technical_rating_usd', 'N/A')
+                    delta = usd_score - tl_score
+                    lines.append(f"| **{row['ticker']}** | {tl_score:.0f} | {tl_rating} | "
+                                 f"{usd_score:.0f} | {usd_rating} | {delta:+.0f} |")
+                lines.append("")
+
     except Exception as e:
         lines.append(f"*Technical analysis data unavailable: {e}*")
         lines.append("")
@@ -348,24 +377,43 @@ def generate_report():
     lines.append("## 📚 Appendix: Methodology")
     lines.append("")
     
-    lines.append("### Quality Score Components (0-100, PCA-optimized):")
+    lines.append("### Quality Score Components (0-100, EMA-weighted, v3):")
     lines.append("- 20% ROIC (Return on Invested Capital)")
     lines.append("- 15% FCF Margin (Free Cash Flow / Revenue)")
-    lines.append("- 15% Revenue Growth (CAGR)")
-    lines.append("- 10% Margin Stability (lower volatility = better)")
-    lines.append("- 10% Leverage (lower Net Debt/EBITDA = better)")
+    lines.append("- 15% Leverage (lower Net Debt/EBITDA = better)")
+    lines.append("- 10% Revenue Growth (CAGR)")
+    lines.append("- 10% Net Income Growth")
     lines.append("- 10% Cash Quality (CFO / Net Income)")
-    lines.append("- 10% Interest Coverage (EBIT / Interest Expense)")
     lines.append("- 10% Operating Margin Trend")
+    lines.append("- 10% Margin Volatility (lower = better)")
     lines.append("")
-    
+    lines.append("ROIC, FCF, Leverage, and Cash Quality use **EMA averaging** "
+                 "across the latest 4 years of data (weights ≈ 10%/17%/28%/46% "
+                 "from oldest to newest). Recent years dominate, which deflates "
+                 "cyclical peaks and rewards turnarounds.")
+    lines.append("")
+
     lines.append("### Technical Score (0-100, TradingView-style):")
     lines.append("- 15 Moving Average indicators (SMA/EMA at 10-200 periods + Hull/VWMA/Ichimoku)")
     lines.append("- 11 Oscillator indicators (RSI, MACD, Stochastic, CCI, ADX, etc.)")
     lines.append("- Each indicator votes Buy(+1) / Neutral(0) / Sell(-1)")
     lines.append("- Strong Buy ≥ 75, Buy ≥ 55, Hold 45-55, Sell ≥ 25, Strong Sell < 25")
     lines.append("")
-    
+
+    lines.append("### 🇹🇷 BIST / USD Conversion:")
+    lines.append("- **Fundamentals**: TRY-denominated statements are converted to USD before "
+                 "computing metrics. Income statement & cash flow use yearly-average "
+                 "USD/TRY rates; balance sheet uses year-end rates. This makes ROIC, FCF, "
+                 "and growth comparable to US peers (a 50% TRY revenue CAGR is often "
+                 "only ~20% in real USD terms).")
+    lines.append("- **Technicals (dual rating)**: the primary rating uses native TRY prices "
+                 "(matches TradingView). A secondary USD-converted rating is also computed "
+                 "and stored — TRY depreciation typically pulls USD ratings lower because "
+                 "moving averages flip from Buy to Sell.")
+    lines.append("- FX rates from yfinance (USDTRY=X), cached daily in `data/fx/`. "
+                 "If FX is unavailable, the system falls back to TRY with a warning.")
+    lines.append("")
+
     lines.append("### Market Regime Calculation:")
     lines.append("- 50% Trend (200-day MA)")
     lines.append("- 30% Momentum (12-month ROC)")

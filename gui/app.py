@@ -210,7 +210,7 @@ with tab1:
         render_overview_section(global_df, "Global / US Stocks", "🌐")
         if has_bist:
             st.markdown("---")
-            render_overview_section(bist_df, "BIST Stocks (TL)", "🇹🇷")
+            render_overview_section(bist_df, "BIST Stocks (fundamentals in USD)", "🇹🇷")
         else:
             # Check if BIST should exist but wasn't found
             sectors_path = Path("sectors.json")
@@ -293,7 +293,7 @@ with tab2:
         # BIST
         if has_bist:
             st.markdown("---")
-            st.subheader("🇹🇷 BIST Stocks (TL)")
+            st.subheader("🇹🇷 BIST Stocks (fundamentals in USD)")
             table = format_scores_table(bist_df.sort_values('quality_score', ascending=False))
             st.dataframe(add_quality_indicator(table), use_container_width=True, hide_index=True)
 
@@ -310,26 +310,40 @@ with tab3:
         tech_df = pd.read_csv(TECH_PATH)
         tech_global, tech_bist, tech_has_bist = split_by_region(tech_df)
 
-        def format_tech_table(df):
+        def format_tech_table(df, include_usd=False):
             cols = ['ticker', 'category', 'technical_score', 'technical_rating']
             if 'ma_buy' in df.columns: cols += ['ma_buy', 'ma_sell', 'osc_buy', 'osc_sell']
             if 'rsi' in df.columns: cols.append('rsi')
+            # Dual rating columns for BIST (USD-converted secondary view)
+            if include_usd and 'technical_score_usd' in df.columns:
+                cols += ['technical_score_usd', 'technical_rating_usd']
             if 'quality_score' in df.columns: cols.append('quality_score')
             cols = [c for c in cols if c in df.columns]
             out = df[cols].copy()
-            for c in ['technical_score', 'rsi', 'quality_score']:
+            for c in ['technical_score', 'technical_score_usd', 'rsi', 'quality_score']:
                 if c in out.columns: out[c] = out[c].round(1)
-            return out.sort_values('technical_score', ascending=False)
+            # Friendlier column labels
+            rename = {
+                'technical_score': 'Tech (TL)' if include_usd else 'Tech',
+                'technical_rating': 'Rating (TL)' if include_usd else 'Rating',
+                'technical_score_usd': 'Tech (USD)',
+                'technical_rating_usd': 'Rating (USD)',
+            }
+            out = out.rename(columns={k: v for k, v in rename.items() if k in out.columns})
+            sort_col = 'Tech (TL)' if 'Tech (TL)' in out.columns else 'Tech'
+            return out.sort_values(sort_col, ascending=False)
 
         def add_tech_indicator(df):
             """Add emoji indicator based on technical_rating."""
             out = df.copy()
             m = {'Strong Buy': '🟢', 'Buy': '🟢', 'Hold': '🟡', 'Sell': '🔴', 'Strong Sell': '🔴'}
-            if 'technical_rating' in out.columns:
-                out.insert(0, '📊', out['technical_rating'].map(m).fillna('⚪'))
+            # Find the primary rating column under either of its possible names
+            rating_col = next((c for c in ('Rating (TL)', 'Rating', 'technical_rating') if c in out.columns), None)
+            if rating_col is not None:
+                out.insert(0, '📊', out[rating_col].map(m).fillna('⚪'))
             return out
 
-        def render_tech_section(df, label, currency=""):
+        def render_tech_section(df, label, currency="", include_usd=False):
             if len(df) == 0:
                 st.info(f"No {label} stocks.")
                 return
@@ -339,7 +353,8 @@ with tab3:
             with c3: st.metric("Sell Signals", len(df[df['technical_rating'].str.contains('Sell', na=False)]))
             with c4:
                 if 'rsi' in df.columns: st.metric("Oversold", len(df[df['rsi'] < 30]))
-            st.dataframe(add_tech_indicator(format_tech_table(df)), use_container_width=True, hide_index=True)
+            st.dataframe(add_tech_indicator(format_tech_table(df, include_usd=include_usd)),
+                         use_container_width=True, hide_index=True)
 
             with st.expander("📊 Charts", expanded=False):
                 if 'quality_score' in df.columns and 'technical_score' in df.columns:
@@ -355,8 +370,13 @@ with tab3:
         render_tech_section(tech_global, "Global", "USD")
         if tech_has_bist:
             st.markdown("---")
-            st.subheader("🇹🇷 BIST Stocks (TL)")
-            render_tech_section(tech_bist, "BIST", "TL")
+            has_usd = 'technical_score_usd' in tech_bist.columns and tech_bist['technical_score_usd'].notna().any()
+            if has_usd:
+                st.subheader("🇹🇷 BIST Stocks — Dual Rating (TL primary, USD secondary)")
+                st.caption("TL rating uses native prices (matches TradingView). USD rating shows what a USD-based investor sees — TRY depreciation typically pulls USD ratings lower.")
+            else:
+                st.subheader("🇹🇷 BIST Stocks (TL)")
+            render_tech_section(tech_bist, "BIST", "TL", include_usd=has_usd)
 
 # ============================================================================
 # TAB 4: Company Lookup (+ stock price chart)
@@ -495,6 +515,20 @@ with tab4:
                     with c4: st.metric("Trend", tr.get('ma_trend', 'N/A'))
                     if 'ma_buy' in tr.index:
                         st.caption(f"MA: {int(tr.get('ma_buy',0))}B / {int(tr.get('ma_sell',0))}S · Osc: {int(tr.get('osc_buy',0))}B / {int(tr.get('osc_sell',0))}S")
+
+                    # Dual rating for BIST: show USD-converted view
+                    has_usd = ('technical_score_usd' in tr.index and pd.notna(tr.get('technical_score_usd')))
+                    if has_usd:
+                        st.caption("**USD-converted rating** (what a USD investor sees — TRY depreciation often pulls this lower):")
+                        u1, u2, u3, u4 = st.columns(4)
+                        with u1: st.metric("Tech Score (USD)", f"{tr.get('technical_score_usd', 0):.0f}")
+                        with u2: st.metric("Rating (USD)", tr.get('technical_rating_usd', 'N/A'))
+                        with u3:
+                            delta = tr.get('technical_score_usd', 0) - tr.get('technical_score', 0)
+                            st.metric("Δ vs TL", f"{delta:+.0f}")
+                        with u4:
+                            if 'ma_buy_usd' in tr.index:
+                                st.caption(f"MA: {int(tr.get('ma_buy_usd',0))}B / {int(tr.get('ma_sell_usd',0))}S · Osc: {int(tr.get('osc_buy_usd',0))}B / {int(tr.get('osc_sell_usd',0))}S")
         elif ticker:
             st.warning(f"'{ticker}' not found. {len(all_tickers)} companies available.")
 
@@ -521,6 +555,24 @@ with tab5:
         **26 indicators** vote Buy/Neutral/Sell. 15 MAs + 11 Oscillators.
         Strong Buy ≥ 75 · Buy ≥ 55 · Hold 45-55 · Sell ≥ 25 · Strong Sell < 25
         """)
+    with st.expander("🇹🇷 BIST / USD Conversion"):
+        st.markdown("""
+        **Fundamentals (always converted to USD):**
+        Income statement & cash flow are divided by the **yearly-average** USD/TRY rate.
+        Balance sheet items are divided by the **year-end** USD/TRY rate.
+        This makes ROIC, FCF, and especially growth metrics directly comparable to US peers
+        (a 50% TRY revenue CAGR is often only ~20% in real USD terms).
+
+        **Technical analysis (dual rating):**
+        - **Primary (TL):** computed on native TRY prices — matches what TradingView shows.
+        - **Secondary (USD):** the same 26 indicators run on USD-converted prices.
+          Most BIST stocks rate lower in USD because TRY depreciation drags moving-average
+          voters toward "Sell". Use this to see what a USD-based investor experiences.
+
+        FX rates are downloaded from yfinance (USDTRY=X) and cached in `data/fx/`.
+        If FX data is unavailable, the system falls back to TL with a warning — no values
+        are silently corrupted.
+        """)
     with st.expander("🎮 How to Use"):
         st.markdown("""
         1. **Overview**: Top/bottom companies, category averages, report
@@ -530,4 +582,4 @@ with tab5:
         """)
 
 st.markdown("---")
-st.caption("Market Analysis System v3 | EMA Weights | BIST Support")
+st.caption("Market Analysis System v3 | EMA Weights | BIST USD Conversion")

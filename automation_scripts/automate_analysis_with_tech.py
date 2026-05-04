@@ -26,7 +26,20 @@ def main():
     print(f"\nStarted: {start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
     
     steps = []
-    
+
+    # ===== Warm up FX cache (BIST USD conversion) — best-effort =====
+    try:
+        from fx_rates import load_or_download_rates
+        fx_df = load_or_download_rates()
+        if fx_df is not None and len(fx_df) > 0:
+            print(f"  💱 USD/TRY FX cache ready: {len(fx_df)} days "
+                  f"(latest: {fx_df.index[-1].date()} → {fx_df['usdtry'].iloc[-1]:.3f})")
+        else:
+            print("  ⚠️  USD/TRY FX unavailable — BIST stocks will fall back to TRY")
+    except Exception as e:
+        print(f"  ⚠️  FX warm-up failed ({e}); BIST stocks will fall back to TRY")
+    print()
+
     # ===== STEP 1: Download Market Data =====
     try:
         print("▶ Step 1/9: Downloading Market Data...")
