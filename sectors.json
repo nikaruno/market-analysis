@@ -82,7 +82,7 @@
       "enabled": true,
       "type": "manual",
       "region": "turkey",
-      "tickers": ["TCELL.IS", "TTKOM.IS", "NETAS.IS"]
+      "tickers": ["TCELL.IS", "TTKOM.IS", "NETAS.IS", "THYAO.IS"]
     },
     "bist-realestate": {
       "name": "BIST Real Estate",

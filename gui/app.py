@@ -61,6 +61,56 @@ def load_tech_lookup():
         return dict(zip(t['ticker'], t['technical_rating']))
     return {}
 
+def load_mcap_lookup():
+    """
+    Build a {ticker → market cap in USD billions} dict.
+
+    Sources market_cap and currency from data/fundamentals_raw.csv (populated
+    by scrape_fundamentals.py). TRY market caps are converted to USD using
+    the latest USD/TRY spot rate; everything else is treated as USD-equivalent.
+    Returns {} if the file is missing or unreadable.
+    """
+    try:
+        raw_path = Path("data/fundamentals_raw.csv")
+        if not raw_path.exists():
+            return {}
+        raw = pd.read_csv(raw_path)
+        if "ticker" not in raw.columns or "market_cap" not in raw.columns:
+            return {}
+        raw["market_cap"] = pd.to_numeric(raw["market_cap"], errors="coerce")
+
+        try_rate = None
+        try:
+            import fx_rates  # noqa: WPS433
+            if fx_rates.is_available():
+                spot = fx_rates.get_spot_series()
+                if not spot.empty:
+                    try_rate = float(spot.iloc[-1])
+        except Exception:
+            pass
+
+        def _to_usd_b(row):
+            mc = row.get("market_cap")
+            if pd.isna(mc) or mc <= 0:
+                return float("nan")
+            cur = str(row.get("currency", "USD")).upper()
+            if cur == "TRY":
+                if try_rate is None or try_rate <= 0:
+                    return float("nan")
+                return mc / try_rate / 1e9
+            return mc / 1e9
+
+        raw["mcap_usd_b"] = raw.apply(_to_usd_b, axis=1)
+        # Deduplicate (a ticker may appear in multiple sectors); keep the
+        # row with the largest non-null mcap.
+        dedup = (raw.dropna(subset=["mcap_usd_b"])
+                    .sort_values("mcap_usd_b", ascending=False)
+                    .drop_duplicates(subset="ticker", keep="first"))
+        return dict(zip(dedup["ticker"], dedup["mcap_usd_b"]))
+    except Exception as e:
+        print(f"[GUI] load_mcap_lookup failed: {e}")
+        return {}
+
 def score_color(score):
     if pd.isna(score): return '#555555'
     if score >= 65: return '#1b5e20'
@@ -245,6 +295,7 @@ with tab2:
         scores_df = pd.read_csv(SCORES_PATH)
         global_df, bist_df, has_bist = split_by_region(scores_df)
         tech_lookup = load_tech_lookup()
+        mcap_lookup = load_mcap_lookup()
 
         def format_scores_table(df):
             """Numeric columns stay numeric for proper sorting."""
@@ -260,6 +311,9 @@ with tab2:
                     out[c] = (out[c] * 100).round(1)
             out = out.rename(columns={'roic_avg': 'ROIC %', 'fcf_margin': 'FCF %', 'revenue_cagr': 'Growth %'})
             out['Technical'] = out['ticker'].map(tech_lookup).fillna('No Data')
+            # Market cap (USD billions) — numeric for proper sorting
+            if mcap_lookup:
+                out['Mcap $B'] = out['ticker'].map(mcap_lookup).round(1)
             return out
 
         def add_quality_indicator(df):
@@ -419,33 +473,204 @@ with tab4:
             with c3: st.metric("Category", category)
             with c4: st.metric("Data Complete", f"{rs.get('data_completeness', 100):.0f}%")
 
-            # --- STOCK PRICE CHART ---
+            # --- STOCK PRICE CHART (USD for BIST, native USD for global) ---
             st.markdown("---")
-            st.subheader("📈 Stock Price (1 Year)")
+            is_bist = ticker.upper().endswith(".IS")
+            price_currency = "USD"
+            st.subheader(f"📈 Stock Price (1 Year, {price_currency})")
             try:
                 import yfinance as yf
                 stock = yf.Ticker(ticker)
                 hist = stock.history(period="1y")
                 if len(hist) > 0:
+                    fx_note = ""
+                    if is_bist:
+                        # BIST tickers come from yfinance in TRY → convert to USD
+                        try:
+                            import fx_rates  # noqa: WPS433
+                            if fx_rates.is_available():
+                                hist = fx_rates.convert_ohlcv(hist)
+                                fx_note = "Converted from TRY using daily USD/TRY spot rate."
+                            else:
+                                price_currency = "TRY"
+                                fx_note = "⚠️ FX rates unavailable — showing native TRY."
+                        except Exception as fxe:
+                            price_currency = "TRY"
+                            fx_note = f"⚠️ FX conversion failed ({fxe}); showing TRY."
+
                     fig = go.Figure()
                     fig.add_trace(go.Candlestick(
                         x=hist.index, open=hist['Open'], high=hist['High'],
                         low=hist['Low'], close=hist['Close'], name=ticker
                     ))
                     fig.update_layout(
-                        title=f"{ticker} — 1 Year Price",
-                        yaxis_title="Price",
+                        title=f"{ticker} — 1 Year Price ({price_currency})",
+                        yaxis_title=f"Price ({price_currency})",
                         xaxis_rangeslider_visible=False,
                         margin=dict(t=40, b=20, l=40, r=20),
                         height=350
                     )
                     st.plotly_chart(fig, use_container_width=True)
+                    if fx_note:
+                        st.caption(fx_note)
                 else:
                     st.info("No price data available for this ticker.")
             except ImportError:
                 st.info("Install yfinance (`pip install yfinance`) to see price charts.")
             except Exception as e:
                 st.info(f"Could not load price data: {e}")
+
+            # --- REVENUE & NET INCOME BAR CHART ---
+            st.markdown("---")
+            bar_currency = "USD"
+            st.subheader(f"💰 Revenue & Net Income by Year ({bar_currency})")
+            try:
+                # Resolve income statement filename — handles both ASELS_IS_income.csv
+                # (yfinance dot-replacement style) and direct ticker.csv naming.
+                raw_dir = Path("data/fundamentals/raw")
+                candidates = [
+                    raw_dir / f"{ticker}_income.csv",
+                    raw_dir / f"{ticker.replace('.', '_')}_income.csv",
+                ]
+                income_path = next((p for p in candidates if p.exists()), None)
+
+                if income_path is None:
+                    st.info("No income statement data found for this ticker. "
+                            "Run the full analysis pipeline to download it.")
+                else:
+                    inc = pd.read_csv(income_path, index_col=0)
+
+                    # Find Total Revenue and Net Income rows (using same key
+                    # patterns as compute_detailed_metrics)
+                    def find_row(df, candidates):
+                        for name in candidates:
+                            if name in df.index:
+                                return df.loc[name]
+                        return None
+
+                    rev = find_row(inc, ["Total Revenue", "Revenue"])
+                    ni = find_row(inc, ["Net Income", "Net Income Common Stockholders"])
+
+                    if rev is None or ni is None:
+                        st.info(f"Income statement is missing Revenue or Net Income rows. "
+                                f"Available rows: {list(inc.index)[:8]}…")
+                    else:
+                        # Normalise column order to chronological (oldest first)
+                        # and parse year from each period-end date column.
+                        records = []
+                        for col in inc.columns:
+                            try:
+                                year = pd.to_datetime(col).year
+                            except Exception:
+                                continue
+                            r = pd.to_numeric(rev.get(col), errors="coerce")
+                            n = pd.to_numeric(ni.get(col), errors="coerce")
+                            records.append({"year": year, "revenue": r, "net_income": n})
+
+                        if not records:
+                            st.info("Income statement columns aren't dated — can't build the chart.")
+                        else:
+                            df_bar = pd.DataFrame(records).sort_values("year")
+                            df_bar = df_bar.drop_duplicates(subset="year", keep="last")
+
+                            # USD conversion for BIST
+                            fx_caption = ""
+                            if is_bist:
+                                try:
+                                    import fx_rates  # noqa: WPS433
+                                    if fx_rates.is_available():
+                                        rates = [fx_rates.get_yearly_avg(int(y)) for y in df_bar["year"]]
+                                        df_bar["fx_rate"] = rates
+                                        df_bar["revenue"] = df_bar["revenue"] / df_bar["fx_rate"]
+                                        df_bar["net_income"] = df_bar["net_income"] / df_bar["fx_rate"]
+                                        fx_caption = "Converted from TRY using yearly-average USD/TRY rates."
+                                    else:
+                                        bar_currency = "TRY"
+                                        fx_caption = "⚠️ FX rates unavailable — showing native TRY."
+                                except Exception as fxe:
+                                    bar_currency = "TRY"
+                                    fx_caption = f"⚠️ FX conversion failed ({fxe}); showing TRY."
+
+                            # Pick a sensible scale (B for >= 1bn USD, M otherwise)
+                            max_abs = max(
+                                df_bar["revenue"].abs().max() if df_bar["revenue"].notna().any() else 0,
+                                df_bar["net_income"].abs().max() if df_bar["net_income"].notna().any() else 0,
+                            )
+                            if max_abs >= 1e9:
+                                scale, scale_label = 1e9, "Billions"
+                            elif max_abs >= 1e6:
+                                scale, scale_label = 1e6, "Millions"
+                            else:
+                                scale, scale_label = 1, ""
+
+                            df_bar["Revenue"] = df_bar["revenue"] / scale
+                            df_bar["Net Income"] = df_bar["net_income"] / scale
+
+                            fig_bar = go.Figure()
+                            fig_bar.add_trace(go.Bar(
+                                x=df_bar["year"].astype(str),
+                                y=df_bar["Revenue"],
+                                name="Revenue",
+                                marker_color="#3b82f6",
+                                text=[f"{v:.2f}" if pd.notna(v) else "" for v in df_bar["Revenue"]],
+                                textposition="outside",
+                                cliponaxis=False,
+                            ))
+                            fig_bar.add_trace(go.Bar(
+                                x=df_bar["year"].astype(str),
+                                y=df_bar["Net Income"],
+                                name="Net Income",
+                                marker_color="#10b981",
+                                text=[f"{v:.2f}" if pd.notna(v) else "" for v in df_bar["Net Income"]],
+                                textposition="outside",
+                                cliponaxis=False,
+                            ))
+                            y_label = f"{bar_currency}" + (f" ({scale_label})" if scale_label else "")
+
+                            # Pad the y-axis so outside labels (top of bars and
+                            # below zero for negative net income) aren't clipped.
+                            all_vals = pd.concat([df_bar["Revenue"], df_bar["Net Income"]]).dropna()
+                            if len(all_vals) > 0:
+                                ymax = float(all_vals.max())
+                                ymin = float(all_vals.min())
+                                span = ymax - ymin if ymax != ymin else max(abs(ymax), 1.0)
+                                pad = span * 0.18
+                                y_low = min(0, ymin - pad)
+                                y_high = ymax + pad
+                            else:
+                                y_low, y_high = 0, 1
+
+                            fig_bar.update_layout(
+                                barmode="group",
+                                xaxis_title="Year",
+                                yaxis_title=y_label,
+                                yaxis=dict(range=[y_low, y_high]),
+                                margin=dict(t=30, b=20, l=50, r=20),
+                                height=420,
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                            )
+                            fig_bar.add_hline(y=0, line_color="rgba(128,128,128,0.4)", line_width=1)
+                            st.plotly_chart(fig_bar, use_container_width=True)
+                            if fx_caption:
+                                st.caption(fx_caption)
+
+                            # Compact YoY-growth table beneath the chart
+                            df_bar["Rev YoY"] = df_bar["revenue"].pct_change()
+                            df_bar["NI YoY"] = df_bar["net_income"].pct_change()
+                            tbl = pd.DataFrame({
+                                "Year": df_bar["year"].astype(str),
+                                f"Revenue ({bar_currency} {scale_label})".strip():
+                                    df_bar["Revenue"].round(2),
+                                f"Net Income ({bar_currency} {scale_label})".strip():
+                                    df_bar["Net Income"].round(2),
+                                "Rev YoY":
+                                    df_bar["Rev YoY"].apply(lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—"),
+                                "NI YoY":
+                                    df_bar["NI YoY"].apply(lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—"),
+                            })
+                            st.dataframe(tbl, use_container_width=True, hide_index=True)
+            except Exception as e:
+                st.info(f"Could not load Revenue/Net Income chart: {e}")
 
             # --- METRICS TABLE ---
             st.markdown("---")
@@ -498,6 +723,10 @@ with tab4:
                 if c in pd_display.columns:
                     pd_display[c] = (pd_display[c] * 100).round(1)
             pd_display = pd_display.rename(columns={'roic_avg': 'ROIC %', 'fcf_margin': 'FCF %', 'revenue_cagr': 'Growth %'})
+            # Market cap (USD billions) — numeric so the column sorts correctly
+            peer_mcaps = load_mcap_lookup()
+            if peer_mcaps:
+                pd_display['Mcap $B'] = pd_display['ticker'].map(peer_mcaps).round(1)
             st.dataframe(pd_display, use_container_width=True, hide_index=True)
 
             # --- TECHNICAL ---
