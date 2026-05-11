@@ -111,6 +111,53 @@ def load_mcap_lookup():
         print(f"[GUI] load_mcap_lookup failed: {e}")
         return {}
 
+def load_pe_lookup():
+    """
+    Build a {ticker → P/E ratio} dict from data/fundamentals_raw.csv.
+
+    P/E = market_cap / net_income. Both numerator and denominator are in the
+    company's native currency, so the ratio is unit-free — no FX conversion
+    is needed. A 25x P/E means the same thing on BIST as on NYSE.
+
+    Edge cases:
+      - net_income missing or <= 0 → omitted from the dict (P/E is undefined
+        or negative for loss-making companies, and showing a negative P/E is
+        misleading rather than informative).
+      - net_income tiny (P/E > 999) → capped at 999.0 to keep the column readable.
+      - duplicate tickers → kept once, with the largest valid market_cap.
+
+    Returns {} if the file is missing or unreadable.
+    """
+    try:
+        raw_path = Path("data/fundamentals_raw.csv")
+        if not raw_path.exists():
+            return {}
+        raw = pd.read_csv(raw_path)
+        needed = {"ticker", "market_cap", "net_income"}
+        if not needed.issubset(raw.columns):
+            return {}
+        raw["market_cap"] = pd.to_numeric(raw["market_cap"], errors="coerce")
+        raw["net_income"] = pd.to_numeric(raw["net_income"], errors="coerce")
+
+        def _pe(row):
+            mc = row.get("market_cap")
+            ni = row.get("net_income")
+            if pd.isna(mc) or pd.isna(ni) or mc <= 0 or ni <= 0:
+                return float("nan")
+            pe = mc / ni
+            return min(pe, 999.0)  # cap astronomical P/Es
+
+        raw["pe"] = raw.apply(_pe, axis=1)
+        # Pick the row with the largest market_cap for each ticker (matches
+        # the dedup strategy used by load_mcap_lookup).
+        dedup = (raw.dropna(subset=["pe"])
+                    .sort_values("market_cap", ascending=False)
+                    .drop_duplicates(subset="ticker", keep="first"))
+        return dict(zip(dedup["ticker"], dedup["pe"]))
+    except Exception as e:
+        print(f"[GUI] load_pe_lookup failed: {e}")
+        return {}
+
 def score_color(score):
     if pd.isna(score): return '#555555'
     if score >= 65: return '#1b5e20'
@@ -296,6 +343,7 @@ with tab2:
         global_df, bist_df, has_bist = split_by_region(scores_df)
         tech_lookup = load_tech_lookup()
         mcap_lookup = load_mcap_lookup()
+        pe_lookup = load_pe_lookup()
 
         def format_scores_table(df):
             """Numeric columns stay numeric for proper sorting."""
@@ -314,6 +362,9 @@ with tab2:
             # Market cap (USD billions) — numeric for proper sorting
             if mcap_lookup:
                 out['Mcap $B'] = out['ticker'].map(mcap_lookup).round(1)
+            # P/E ratio — currency-neutral, NaN for loss-makers
+            if pe_lookup:
+                out['P/E'] = out['ticker'].map(pe_lookup).round(1)
             return out
 
         def add_quality_indicator(df):
@@ -727,6 +778,10 @@ with tab4:
             peer_mcaps = load_mcap_lookup()
             if peer_mcaps:
                 pd_display['Mcap $B'] = pd_display['ticker'].map(peer_mcaps).round(1)
+            # P/E ratio — currency-neutral, NaN for loss-makers
+            peer_pes = load_pe_lookup()
+            if peer_pes:
+                pd_display['P/E'] = pd_display['ticker'].map(peer_pes).round(1)
             st.dataframe(pd_display, use_container_width=True, hide_index=True)
 
             # --- TECHNICAL ---
