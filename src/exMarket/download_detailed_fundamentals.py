@@ -47,6 +47,7 @@ def download_company(ticker: str, category: str = None, region: str = None):
             "industry": info.get("industry"),
             "market_cap": info.get("marketCap"),
             "currency": info.get("currency"),
+            "financial_currency": info.get("financialCurrency"),
             "country": info.get("country"),
             "company_name": info.get("longName"),
             "exchange": info.get("exchange")

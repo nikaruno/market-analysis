@@ -157,6 +157,17 @@ def get_year_end(year: int) -> float:
     return float(yearly.iloc[-1])
 
 
+def get_latest_spot() -> float:
+    """Most recent available USD/TRY spot rate. NaN if unavailable.
+    Used to convert a current market cap (trading currency) into the
+    financial-statement currency so valuation ratios don't mix currencies.
+    """
+    s = get_spot_series()
+    if s.empty:
+        return float("nan")
+    return float(s.iloc[-1])
+
+
 def get_rate_for_period_end(period_end) -> float:
     """
     USD/TRY rate as of a specific period-end date (or last available

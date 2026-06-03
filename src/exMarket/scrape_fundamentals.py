@@ -233,6 +233,7 @@ def fetch_fundamentals(tickers, category=None, region=None):
                 "debt": info.get("totalDebt"),
                 "ebit": info.get("ebitda"),
                 "currency": info.get("currency"),
+                "financial_currency": info.get("financialCurrency"),
             })
             time.sleep(0.5)
             

@@ -140,9 +140,10 @@ def _load_pe_lookup_impl():
     """
     Build a {ticker → P/E ratio} dict from data/fundamentals_raw.csv.
 
-    P/E = market_cap / net_income. Both numerator and denominator are in the
-    company's native currency, so the ratio is unit-free — no FX conversion
-    is needed. A 25x P/E means the same thing on BIST as on NYSE.
+    P/E = market_cap / net_income. The ratio is unit-free *only when both are
+    in the same currency*. yfinance can report net_income in a different
+    currency than the stock trades in (e.g. THYAO trades TRY but reports USD),
+    so the market cap is aligned to the financial currency before dividing.
 
     Edge cases:
       - net_income missing or <= 0 → omitted from the dict (P/E is undefined
@@ -169,6 +170,10 @@ def _load_pe_lookup_impl():
             ni = row.get("net_income")
             if pd.isna(mc) or pd.isna(ni) or mc <= 0 or ni <= 0:
                 return float("nan")
+            # net_income is in the financial currency; align the market cap to
+            # it so a TRY-trading / USD-reporting stock (e.g. THYAO) isn't ~30x off.
+            mc = _adjust_mcap_to_financial_ccy(mc, row.get("currency"),
+                                               row.get("financial_currency"))
             pe = mc / ni
             return min(pe, 999.0)  # cap astronomical P/Es
 
@@ -222,6 +227,44 @@ def _get_latest_row_value(df, names):
             except Exception:
                 continue
     return float("nan")
+
+
+def _meta_currencies(ticker):
+    """Return (trading_currency, financial_currency) from a ticker's meta.json.
+    Tries both the raw ticker and the dot→underscore safe filename.
+    Returns (None, None) if unavailable."""
+    raw_dir = Path("data/fundamentals/raw")
+    for t in [ticker, ticker.replace('.', '_')]:
+        p = raw_dir / f"{t}_meta.json"
+        if p.exists():
+            try:
+                m = json.loads(p.read_text())
+                return m.get("currency"), m.get("financial_currency")
+            except Exception:
+                return None, None
+    return None, None
+
+
+def _adjust_mcap_to_financial_ccy(mc, trade_ccy, fin_ccy):
+    """Bring a market cap (reported in the trading currency) into the
+    financial-statement currency, so ratios like P/E and EV/EBITDA never mix
+    currencies. yfinance can report statements in a different currency than the
+    stock trades in (e.g. THYAO trades TRY, reports USD); without this the ratio
+    is ~30x off. Only TRY→USD is handled (the BIST mismatch); other combos and
+    matching currencies pass through unchanged."""
+    if pd.isna(mc):
+        return mc
+    t = (trade_ccy or "").upper().strip()
+    f = (fin_ccy or "").upper().strip()
+    if t and f and t != f and t == "TRY" and f == "USD":
+        try:
+            import fx_rates
+            spot = fx_rates.get_latest_spot()
+            if spot and not pd.isna(spot) and spot > 0:
+                return mc / spot
+        except Exception:
+            return mc
+    return mc
 
 
 @st.cache_data(show_spinner=False)
@@ -353,6 +396,10 @@ def _load_ev_ebitda_lookup_impl():
             debt = 0.0 if pd.isna(debt) else debt
             cash = 0.0 if pd.isna(cash) else cash
 
+            # debt/cash/ebitda are in the financial currency; align market cap
+            # to the same currency before forming EV (THYAO-type TRY/USD split).
+            mc = _adjust_mcap_to_financial_ccy(mc, row.get("currency"),
+                                               row.get("financial_currency"))
             ev = mc + debt - cash
             ev_ebitda = ev / ebitda
             # EV can theoretically be negative (massive cash, tiny mcap) →
@@ -863,9 +910,15 @@ with tab4:
                             df_bar = pd.DataFrame(records).sort_values("year")
                             df_bar = df_bar.drop_duplicates(subset="year", keep="last")
 
-                            # USD conversion for BIST
+                            # Currency-aware USD conversion. Convert only when
+                            # the statements are actually in TRY — a BIST stock
+                            # that reports in USD (e.g. THYAO) must NOT be divided
+                            # by USD/TRY again.
                             fx_caption = ""
-                            if is_bist:
+                            _trade_ccy, _fin_ccy = _meta_currencies(ticker)
+                            stmt_ccy = (_fin_ccy or ("TRY" if is_bist else "USD")).upper().strip()
+                            _assumed = (_fin_ccy is None and is_bist)
+                            if stmt_ccy == "TRY":
                                 try:
                                     import fx_rates  # noqa: WPS433
                                     if fx_rates.is_available():
@@ -876,12 +929,17 @@ with tab4:
                                         if has_ebitda:
                                             df_bar["ebitda"] = df_bar["ebitda"] / df_bar["fx_rate"]
                                         fx_caption = "Converted from TRY using yearly-average USD/TRY rates."
+                                        if _assumed:
+                                            fx_caption += (" ⚠️ Statement currency unknown — assumed TRY; "
+                                                           "re-download to capture financialCurrency.")
                                     else:
                                         bar_currency = "TRY"
                                         fx_caption = "⚠️ FX rates unavailable — showing native TRY."
                                 except Exception as fxe:
                                     bar_currency = "TRY"
                                     fx_caption = f"⚠️ FX conversion failed ({fxe}); showing TRY."
+                            elif is_bist and stmt_ccy == "USD":
+                                fx_caption = "Source reports in USD — shown as-is, no TRY conversion applied."
 
                             # Pick a sensible scale (B for >= 1bn USD, M otherwise)
                             max_abs = max(

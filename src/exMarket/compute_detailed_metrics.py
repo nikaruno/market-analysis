@@ -80,7 +80,8 @@ def load_statements(ticker):
     print(f"  [WARN] Missing files for {ticker} (tried {ticker} and {safe_ticker})")
     return None, None, None
 
-def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
+def compute_metrics(ticker, category=None, region=None, tax_rate=0.25,
+                    financial_currency=None):
     """Compute fundamental quality metrics for a company."""
     try:
         income, balance, cashflow = load_statements(ticker)
@@ -93,31 +94,48 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         balance = balance.iloc[:, ::-1]
         cashflow = cashflow.iloc[:, ::-1]
 
-        # ---- FX CONVERSION (BIST → USD) -------------------------------------
-        # Turkish stocks report in TRY. To make ROIC/FCF/growth comparable to
-        # US peers — and especially to remove the inflation distortion from
-        # CAGR metrics — we convert statements to USD before computing.
-        #   - Income statement & cash flow → divide each column by yearly-avg USD/TRY
-        #     (these are flows accumulated through the year)
-        #   - Balance sheet → divide each column by USD/TRY at the period-end date
-        #     (these are point-in-time stock values)
-        # Margin ratios are unit-free and unaffected by conversion. Growth ratios
-        # (CAGR) are the main beneficiary.
-        currency_used = "USD" if region != "turkey" else "USD"  # default USD label
-        if region == "turkey" and _FX_AVAILABLE:
-            try:
-                if fx_rates.is_available():
+        # ---- FX CONVERSION (statement currency → USD) -----------------------
+        # yfinance returns statements in the company's *financial* currency,
+        # which is NOT always the trading currency. e.g. THYAO trades in TRY
+        # but reports in USD; TTKOM reports in TRY. We must convert based on
+        # the actual statement currency, never on region — otherwise a
+        # USD-reporting BIST name gets wrongly divided by USD/TRY and shrinks
+        # ~30x, making it look far smaller than its TRY-reporting peers.
+        #   - Income statement & cash flow → divide by yearly-avg USD/TRY
+        #     (flows accumulated through the year)
+        #   - Balance sheet → divide by USD/TRY at the period-end date
+        #     (point-in-time stock values)
+        # Margin ratios are unit-free; growth/CAGR ratios are the main beneficiary.
+        src_ccy = (financial_currency or "").upper().strip()
+        if not src_ccy:
+            # Legacy fallback: no currency recorded (pre-fix download). Assume
+            # TRY for Turkish names (old behavior), USD otherwise.
+            src_ccy = "TRY" if region == "turkey" else "USD"
+            if region == "turkey":
+                print(f"  [WARN] {ticker}: no financial_currency in meta; assuming TRY "
+                      f"— re-download to capture it")
+
+        currency_used = "USD"
+        if src_ccy == "TRY":
+            if _FX_AVAILABLE and fx_rates.is_available():
+                try:
                     income   = fx_rates.convert_statement_columns(income,   "yearly_avg")
                     cashflow = fx_rates.convert_statement_columns(cashflow, "yearly_avg")
                     balance  = fx_rates.convert_statement_columns(balance,  "period_end")
                     currency_used = "USD (from TRY)"
                     print(f"  ✓ FX-converted TRY → USD")
-                else:
-                    currency_used = "TRY (FX unavailable)"
-                    print(f"  [WARN] FX rates unavailable; metrics will be in TRY (not comparable to USD peers)")
-            except Exception as fxe:
-                currency_used = "TRY (FX failed)"
-                print(f"  [WARN] FX conversion failed for {ticker}: {fxe}")
+                except Exception as fxe:
+                    currency_used = "TRY (FX failed)"
+                    print(f"  [WARN] FX conversion failed for {ticker}: {fxe}")
+            else:
+                currency_used = "TRY (FX unavailable)"
+                print(f"  [WARN] FX rates unavailable; {ticker} metrics in TRY (not USD-comparable)")
+        elif src_ccy == "USD":
+            currency_used = "USD"  # already USD — no conversion (e.g. THYAO)
+        else:
+            # Some other reporting currency (e.g. EUR) — no rate path available.
+            currency_used = src_ccy
+            print(f"  [WARN] {ticker}: statements in {src_ccy}; no FX path, left unconverted")
         # ---------------------------------------------------------------------
         
         # Check available years
@@ -216,7 +234,8 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
             "ticker": ticker,
             "category": category,
             "region": region or "global",
-            "currency": currency_used if region == "turkey" else "USD",
+            "currency": currency_used,
+            "financial_currency": src_ccy,
             "years_used": years_to_use,
             "roic_avg": roic_avg,
             "fcf_margin": fcf_margin,
@@ -265,22 +284,31 @@ def main():
         ticker = row['ticker']
         category = row.get('category', None)
         
-        # Determine region: from meta file, sectors.json, or default
+        # Determine region + financial currency from meta (try both the raw
+        # ticker and the dot→underscore safe filename), then sectors.json.
         region = "global"
-        meta_path = RAW_DIR / f"{ticker}_meta.json"
-        if meta_path.exists():
-            import json
-            with open(meta_path, 'r') as f:
-                meta = json.load(f)
+        financial_currency = None
+        import json
+        meta = None
+        for mt in [ticker, ticker.replace('.', '_')]:
+            meta_path = RAW_DIR / f"{mt}_meta.json"
+            if meta_path.exists():
+                with open(meta_path, 'r') as f:
+                    meta = json.load(f)
+                break
+        if meta is not None:
             region = meta.get("region", "global")
+            financial_currency = meta.get("financial_currency")
         elif category and category in sectors_regions:
             region = sectors_regions[category]
         elif category and category.startswith("bist"):
             region = "turkey"
         
-        print(f"\n[{idx+1}/{len(universe_df)}] Computing metrics for {ticker} ({category}, {region})...")
+        print(f"\n[{idx+1}/{len(universe_df)}] Computing metrics for {ticker} "
+              f"({category}, {region}, ccy={financial_currency or '?'})...")
         
-        metrics = compute_metrics(ticker, category, region=region)
+        metrics = compute_metrics(ticker, category, region=region,
+                                  financial_currency=financial_currency)
         
         if metrics:
             rows.append(metrics)
