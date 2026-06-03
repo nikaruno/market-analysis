@@ -9,13 +9,11 @@
     "defense"
   ],
   "weights": {
-    "roic": 0.20,
-    "fcf": 0.15,
-    "cash_quality": 0.10,
+    "roic": 0.25,
+    "fcf": 0.20,
+    "cash_quality": 0.15,
     "leverage": 0.15,
     "revenue_growth": 0.10,
-    "income_growth": 0.10,
-    "margin_trend": 0.10,
-    "margin_volatility": 0.10
+    "ebitda_growth": 0.15
   }
 }

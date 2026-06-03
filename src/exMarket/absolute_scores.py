@@ -1,7 +1,9 @@
 """
-Absolute Quality Scoring System v3
+Absolute Quality Scoring System v3.1
 - EMA averaging for ROIC, FCF, Leverage, Cash Quality (recent years weighted more)
-- Removed interest_coverage (too noisy, redundant with leverage)
+- 6 metrics: ROIC, FCF, Cash Quality, Leverage, Revenue Growth, EBITDA Growth
+- Removed: interest_coverage, margin_trend, margin_volatility (noisy on 4yr windows)
+- EBITDA Growth replaces net-income growth (cleaner of tax/one-time/non-op items)
 - Per-row weight redistribution for missing metrics
 - Deduplication of tickers appearing in multiple sectors
 """
@@ -17,17 +19,15 @@ CONFIG_FILE = Path("config.json")
 
 def load_weights():
     """Load weights from config file or use defaults.
-    v3: 7 metrics, no interest_coverage.
+    v3.1: 6 metrics. Removed interest_coverage, margin_trend, margin_volatility.
     """
     defaults = {
-        'roic': 0.20,
-        'fcf': 0.15,
-        'cash_quality': 0.10,
+        'roic': 0.25,
+        'fcf': 0.20,
+        'cash_quality': 0.15,
         'leverage': 0.15,
         'revenue_growth': 0.10,
-        'income_growth': 0.10,
-        'margin_trend': 0.10,
-        'margin_volatility': 0.10,
+        'ebitda_growth': 0.15,
     }
 
     if CONFIG_FILE.exists():
@@ -35,20 +35,24 @@ def load_weights():
             config = json.load(f)
             w = config.get('weights', {})
 
-            # Backward compat: if old 'other' key exists, split it
-            if 'other' in w and 'margin_trend' not in w:
-                other = w.pop('other', 0.15)
-                w['margin_trend'] = round(other * 0.5, 2)
-                w['margin_volatility'] = round(other * 0.5, 2)
-
-            # Backward compat: split old 'growth' into revenue + income
+            # Backward compat: split old 'growth' into revenue + EBITDA growth
             if 'growth' in w and 'revenue_growth' not in w:
                 g = w.pop('growth', 0.20)
                 w['revenue_growth'] = round(g * 0.5, 2)
-                w['income_growth'] = round(g * 0.5, 2)
+                w['ebitda_growth'] = round(g * 0.5, 2)
 
-            # Remove deprecated keys
+            # Backward compat: the growth slot used to be net-income growth.
+            # Carry the old weight over to the EBITDA-growth slot.
+            if 'income_growth' in w and 'ebitda_growth' not in w:
+                w['ebitda_growth'] = w.pop('income_growth')
+            w.pop('income_growth', None)
+
+            # Remove deprecated keys (their weight is reclaimed by normalization
+            # against the 6-metric set below).
             w.pop('interest_coverage', None)
+            w.pop('other', None)
+            w.pop('margin_trend', None)
+            w.pop('margin_volatility', None)
 
             # Merge with defaults for any missing keys
             for k, v in defaults.items():
@@ -91,11 +95,11 @@ def compute_absolute_scores(df):
         print(f"  [WARN] Weights sum to {weight_sum:.3f}, normalizing to 1.0")
         weights = {k: v / weight_sum for k, v in weights.items()}
 
-    print("\nComputing absolute quality scores (v3 — EMA + 7 metrics)...")
+    print("\nComputing absolute quality scores (v3.1 — EMA + 6 metrics)...")
 
     # Cap extreme outliers
     metrics_to_cap = ['roic_avg', 'fcf_margin', 'cfo_to_ni', 'revenue_cagr',
-                      'net_debt_ebitda', 'margin_volatility', 'ni_cagr']
+                      'net_debt_ebitda', 'ebitda_cagr']
     for metric in metrics_to_cap:
         if metric in df.columns:
             df[f'{metric}_capped'] = cap_outliers(df[metric])
@@ -106,10 +110,8 @@ def compute_absolute_scores(df):
         ('fcf_margin_capped',        'fcf',               False, 'FCF Margin (EMA)'),
         ('cfo_to_ni_capped',         'cash_quality',      False, 'Cash Quality (EMA)'),
         ('revenue_cagr_capped',      'revenue_growth',    False, 'Revenue Growth'),
-        ('ni_cagr_capped',           'income_growth',     False, 'Net Income Growth'),
-        ('op_margin_trend',          'margin_trend',      False, 'Margin Trend'),
+        ('ebitda_cagr_capped',       'ebitda_growth',     False, 'EBITDA Growth'),
         ('net_debt_ebitda_capped',   'leverage',          True,  'Leverage (EMA, inv)'),
-        ('margin_volatility_capped', 'margin_volatility', True,  'Margin Volatility (inv)'),
     ]
 
     # Normalize each metric to 0-100 percentile scale
@@ -189,7 +191,7 @@ def main():
 
     # Deduplicate tickers in multiple sectors — keep row with most data
     metric_cols = ['roic_avg', 'fcf_margin', 'cfo_to_ni', 'net_debt_ebitda',
-                   'revenue_cagr', 'op_margin_trend', 'margin_volatility']
+                   'revenue_cagr', 'ebitda_cagr']
     existing_cols = [c for c in metric_cols if c in df.columns]
     df['_n_valid'] = df[existing_cols].notna().sum(axis=1)
     before = len(df)

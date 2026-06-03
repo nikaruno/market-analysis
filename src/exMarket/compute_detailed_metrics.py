@@ -158,6 +158,7 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         # Optional metrics
         debt = debt.iloc[-years_to_use:] if debt is not None else pd.Series([0]*years_to_use)
         cash = cash.iloc[-years_to_use:] if cash is not None else pd.Series([0]*years_to_use)
+        ebitda_is_real = ebitda is not None
         ebitda = ebitda.iloc[-years_to_use:] if ebitda is not None else op_income
         interest = interest.iloc[-years_to_use:] if interest is not None else pd.Series([1]*years_to_use)
         
@@ -167,10 +168,7 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         invested_capital = invested_capital.replace(0, np.nan)
         roic = nopat / invested_capital
         roic_avg = ema_mean(roic)  # EMA: recent years weighted more
-        
-        op_margin = op_income / revenue
-        op_margin_trend = np.polyfit(range(years_to_use), op_margin, 1)[0]
-        
+
         # CASH FLOW
         fcf = cfo - capex.abs()
         fcf_margin = ema_mean(fcf / revenue)  # EMA
@@ -184,26 +182,35 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
         
         # DURABILITY
         revenue_cagr = (revenue.iloc[-1] / revenue.iloc[0]) ** (1/(years_to_use-1)) - 1
-        margin_volatility = op_margin.std()
         
-        # NET INCOME GROWTH
-        # Use CAGR when first and last are both positive; otherwise use average YoY growth
-        ni_first = net_income.iloc[0]
-        ni_last = net_income.iloc[-1]
-        if ni_first > 0 and ni_last > 0:
-            ni_cagr = (ni_last / ni_first) ** (1/(years_to_use-1)) - 1
-        elif ni_first < 0 and ni_last > 0:
-            # Turnaround: went from loss to profit — big positive signal
-            ni_cagr = 1.0  # cap at 100% growth
-        elif ni_first > 0 and ni_last < 0:
-            # Deterioration: went from profit to loss — negative signal
-            ni_cagr = -1.0  # cap at -100%
+        # EBITDA GROWTH (replaces net income growth)
+        # EBITDA is far less distorted than net income by tax timing, one-time
+        # items, and non-operating income. A deferred-tax benefit or investment
+        # income can inflate NI growth while the core business is flat (e.g. GEV
+        # post-spin-off), and EBITDA strips that out. It also sits *above* the
+        # IAS 21/29 monetary gain/loss line, so it's cleaner for BIST stocks.
+        # Net income still enters the score via Cash Quality (cfo_to_ni), which
+        # is the metric that flags the divergence.
+        # Same sign/turnaround handling as the old NI growth: CAGR when both
+        # endpoints are positive, capped flags otherwise.
+        eb_first = ebitda.iloc[0]
+        eb_last = ebitda.iloc[-1]
+        if pd.isna(eb_first) or pd.isna(eb_last):
+            ebitda_cagr = np.nan
+        elif eb_first > 0 and eb_last > 0:
+            ebitda_cagr = (eb_last / eb_first) ** (1/(years_to_use-1)) - 1
+        elif eb_first < 0 and eb_last > 0:
+            # Turned EBITDA-positive — strong operational turnaround
+            ebitda_cagr = 1.0  # cap at +100%
+        elif eb_first > 0 and eb_last < 0:
+            # Slid to negative EBITDA — operations broke
+            ebitda_cagr = -1.0  # cap at -100%
         else:
-            # Both negative — compute if losses are shrinking
-            if abs(ni_last) < abs(ni_first):
-                ni_cagr = 0.5  # losses shrinking, mildly positive
+            # Both negative — credit shrinking losses, penalise growing ones
+            if abs(eb_last) < abs(eb_first):
+                ebitda_cagr = 0.5
             else:
-                ni_cagr = -0.5  # losses growing
+                ebitda_cagr = -0.5
         
         return {
             "ticker": ticker,
@@ -212,13 +219,12 @@ def compute_metrics(ticker, category=None, region=None, tax_rate=0.25):
             "currency": currency_used if region == "turkey" else "USD",
             "years_used": years_to_use,
             "roic_avg": roic_avg,
-            "op_margin_trend": op_margin_trend,
             "fcf_margin": fcf_margin,
             "cfo_to_ni": cfo_to_ni,
             "net_debt_ebitda": net_debt_ebitda,
             "revenue_cagr": revenue_cagr,
-            "ni_cagr": ni_cagr,
-            "margin_volatility": margin_volatility
+            "ebitda_cagr": ebitda_cagr,
+            "ebitda_source": "ebitda" if ebitda_is_real else "operating_income",
         }
         
     except Exception as e:

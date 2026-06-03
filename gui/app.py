@@ -393,8 +393,8 @@ if config_file.exists():
         existing_config = json.load(f)
 else:
     existing_config = {"companies_per_sector": 10, "weights": {
-        "roic": 0.20, "fcf": 0.15, "cash_quality": 0.10, "leverage": 0.15,
-        "growth": 0.20, "margin_trend": 0.10, "margin_volatility": 0.10}}
+        "roic": 0.25, "fcf": 0.20, "cash_quality": 0.15, "leverage": 0.15,
+        "revenue_growth": 0.10, "ebitda_growth": 0.15}}
 
 st.sidebar.subheader("📊 Data Collection")
 companies_per_sector = st.sidebar.slider("Companies per Sector", 5, 30, existing_config.get("companies_per_sector", 10), 5)
@@ -413,17 +413,15 @@ else:
     active_sectors = ["electricity", "oil-gas", "semiconductors", "software", "energy", "defense"]
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚖️ Quality Weights (v3)")
+st.sidebar.subheader("⚖️ Quality Weights (v3.1)")
 ew = existing_config.get("weights", {})
 weights = {}
-weights['roic'] = st.sidebar.slider("ROIC (EMA)", 0.0, 0.40, ew.get('roic', 0.20), 0.05)
-weights['fcf'] = st.sidebar.slider("FCF Margin (EMA)", 0.0, 0.30, ew.get('fcf', 0.15), 0.05)
+weights['roic'] = st.sidebar.slider("ROIC (EMA)", 0.0, 0.40, ew.get('roic', 0.25), 0.05)
+weights['fcf'] = st.sidebar.slider("FCF Margin (EMA)", 0.0, 0.30, ew.get('fcf', 0.20), 0.05)
 weights['revenue_growth'] = st.sidebar.slider("Revenue Growth", 0.0, 0.20, ew.get('revenue_growth', 0.10), 0.05)
-weights['income_growth'] = st.sidebar.slider("Net Income Growth", 0.0, 0.20, ew.get('income_growth', 0.10), 0.05)
+weights['ebitda_growth'] = st.sidebar.slider("EBITDA Growth", 0.0, 0.25, ew.get('ebitda_growth', ew.get('income_growth', 0.15)), 0.05)
 weights['leverage'] = st.sidebar.slider("Leverage (EMA, inv)", 0.0, 0.25, ew.get('leverage', 0.15), 0.05)
-weights['cash_quality'] = st.sidebar.slider("Cash Quality (EMA)", 0.0, 0.20, ew.get('cash_quality', 0.10), 0.05)
-weights['margin_trend'] = st.sidebar.slider("Margin Trend", 0.0, 0.20, ew.get('margin_trend', 0.10), 0.05)
-weights['margin_volatility'] = st.sidebar.slider("Margin Stab. (inv)", 0.0, 0.20, ew.get('margin_volatility', 0.10), 0.05)
+weights['cash_quality'] = st.sidebar.slider("Cash Quality (EMA)", 0.0, 0.25, ew.get('cash_quality', 0.15), 0.05)
 
 tw = sum(weights.values())
 normalized_weights = {k: v/tw for k, v in weights.items()} if tw > 0 else weights
@@ -808,10 +806,10 @@ with tab4:
             except Exception as e:
                 st.info(f"Could not load price data: {e}")
 
-            # --- REVENUE & NET INCOME BAR CHART ---
+            # --- REVENUE, EBITDA & NET INCOME BAR CHART ---
             st.markdown("---")
             bar_currency = "USD"
-            st.subheader(f"💰 Revenue & Net Income by Year ({bar_currency})")
+            st.subheader(f"💰 Revenue, EBITDA & Net Income by Year ({bar_currency})")
             try:
                 # Resolve income statement filename — handles both ASELS_IS_income.csv
                 # (yfinance dot-replacement style) and direct ticker.csv naming.
@@ -838,6 +836,8 @@ with tab4:
 
                     rev = find_row(inc, ["Total Revenue", "Revenue"])
                     ni = find_row(inc, ["Net Income", "Net Income Common Stockholders"])
+                    eb = find_row(inc, ["EBITDA", "Normalized EBITDA"])
+                    has_ebitda = eb is not None
 
                     if rev is None or ni is None:
                         st.info(f"Income statement is missing Revenue or Net Income rows. "
@@ -853,7 +853,9 @@ with tab4:
                                 continue
                             r = pd.to_numeric(rev.get(col), errors="coerce")
                             n = pd.to_numeric(ni.get(col), errors="coerce")
-                            records.append({"year": year, "revenue": r, "net_income": n})
+                            e = pd.to_numeric(eb.get(col), errors="coerce") if has_ebitda else np.nan
+                            records.append({"year": year, "revenue": r,
+                                            "ebitda": e, "net_income": n})
 
                         if not records:
                             st.info("Income statement columns aren't dated — can't build the chart.")
@@ -871,6 +873,8 @@ with tab4:
                                         df_bar["fx_rate"] = rates
                                         df_bar["revenue"] = df_bar["revenue"] / df_bar["fx_rate"]
                                         df_bar["net_income"] = df_bar["net_income"] / df_bar["fx_rate"]
+                                        if has_ebitda:
+                                            df_bar["ebitda"] = df_bar["ebitda"] / df_bar["fx_rate"]
                                         fx_caption = "Converted from TRY using yearly-average USD/TRY rates."
                                     else:
                                         bar_currency = "TRY"
@@ -883,6 +887,7 @@ with tab4:
                             max_abs = max(
                                 df_bar["revenue"].abs().max() if df_bar["revenue"].notna().any() else 0,
                                 df_bar["net_income"].abs().max() if df_bar["net_income"].notna().any() else 0,
+                                df_bar["ebitda"].abs().max() if (has_ebitda and df_bar["ebitda"].notna().any()) else 0,
                             )
                             if max_abs >= 1e9:
                                 scale, scale_label = 1e9, "Billions"
@@ -893,6 +898,8 @@ with tab4:
 
                             df_bar["Revenue"] = df_bar["revenue"] / scale
                             df_bar["Net Income"] = df_bar["net_income"] / scale
+                            if has_ebitda:
+                                df_bar["EBITDA"] = df_bar["ebitda"] / scale
 
                             fig_bar = go.Figure()
                             fig_bar.add_trace(go.Bar(
@@ -904,6 +911,16 @@ with tab4:
                                 textposition="outside",
                                 cliponaxis=False,
                             ))
+                            if has_ebitda:
+                                fig_bar.add_trace(go.Bar(
+                                    x=df_bar["year"].astype(str),
+                                    y=df_bar["EBITDA"],
+                                    name="EBITDA",
+                                    marker_color="#f59e0b",
+                                    text=[f"{v:.2f}" if pd.notna(v) else "" for v in df_bar["EBITDA"]],
+                                    textposition="outside",
+                                    cliponaxis=False,
+                                ))
                             fig_bar.add_trace(go.Bar(
                                 x=df_bar["year"].astype(str),
                                 y=df_bar["Net Income"],
@@ -917,7 +934,10 @@ with tab4:
 
                             # Pad the y-axis so outside labels (top of bars and
                             # below zero for negative net income) aren't clipped.
-                            all_vals = pd.concat([df_bar["Revenue"], df_bar["Net Income"]]).dropna()
+                            series_for_range = [df_bar["Revenue"], df_bar["Net Income"]]
+                            if has_ebitda:
+                                series_for_range.append(df_bar["EBITDA"])
+                            all_vals = pd.concat(series_for_range).dropna()
                             if len(all_vals) > 0:
                                 ymax = float(all_vals.max())
                                 ymin = float(all_vals.min())
@@ -941,21 +961,33 @@ with tab4:
                             st.plotly_chart(fig_bar, use_container_width=True)
                             if fx_caption:
                                 st.caption(fx_caption)
+                            if not has_ebitda:
+                                st.caption("ℹ️ No EBITDA row in this income statement — "
+                                           "the score falls back to operating income for EBITDA growth.")
 
-                            # Compact YoY-growth table beneath the chart
+                            # Compact YoY-growth table beneath the chart.
+                            # EBITDA growth is now the scored metric, so its YoY
+                            # sits next to revenue; net income is kept so the
+                            # EBITDA→NI divergence stays visible.
                             df_bar["Rev YoY"] = df_bar["revenue"].pct_change()
                             df_bar["NI YoY"] = df_bar["net_income"].pct_change()
-                            tbl = pd.DataFrame({
+                            scale_suffix = f"({bar_currency} {scale_label})".strip()
+                            tbl_data = {
                                 "Year": df_bar["year"].astype(str),
-                                f"Revenue ({bar_currency} {scale_label})".strip():
-                                    df_bar["Revenue"].round(2),
-                                f"Net Income ({bar_currency} {scale_label})".strip():
-                                    df_bar["Net Income"].round(2),
-                                "Rev YoY":
-                                    df_bar["Rev YoY"].apply(lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—"),
-                                "NI YoY":
-                                    df_bar["NI YoY"].apply(lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—"),
-                            })
+                                f"Revenue {scale_suffix}": df_bar["Revenue"].round(2),
+                            }
+                            if has_ebitda:
+                                df_bar["EBITDA YoY"] = df_bar["ebitda"].pct_change()
+                                tbl_data[f"EBITDA {scale_suffix}"] = df_bar["EBITDA"].round(2)
+                            tbl_data[f"Net Income {scale_suffix}"] = df_bar["Net Income"].round(2)
+                            tbl_data["Rev YoY"] = df_bar["Rev YoY"].apply(
+                                lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—")
+                            if has_ebitda:
+                                tbl_data["EBITDA YoY"] = df_bar["EBITDA YoY"].apply(
+                                    lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—")
+                            tbl_data["NI YoY"] = df_bar["NI YoY"].apply(
+                                lambda v: f"{v*100:+.1f}%" if pd.notna(v) else "—")
+                            tbl = pd.DataFrame(tbl_data)
                             st.dataframe(tbl, use_container_width=True, hide_index=True)
             except Exception as e:
                 st.info(f"Could not load Revenue/Net Income chart: {e}")
@@ -965,14 +997,12 @@ with tab4:
             st.subheader("📊 Raw Metric Values")
 
             metric_info = [
-                ('roic_avg', 'ROIC (EMA)', 'pct', False, 0.20),
-                ('fcf_margin', 'FCF Margin (EMA)', 'pct', False, 0.15),
+                ('roic_avg', 'ROIC (EMA)', 'pct', False, 0.25),
+                ('fcf_margin', 'FCF Margin (EMA)', 'pct', False, 0.20),
                 ('revenue_cagr', 'Revenue Growth (CAGR)', 'pct', False, 0.10),
-                ('ni_cagr', 'Net Income Growth', 'pct', False, 0.10),
+                ('ebitda_cagr', 'EBITDA Growth', 'pct', False, 0.15),
                 ('net_debt_ebitda', 'Leverage (EMA)', 'ratio', True, 0.15),
-                ('margin_volatility', 'Margin Volatility', 'pct', True, 0.10),
-                ('cfo_to_ni', 'Cash Quality (EMA)', 'ratio', False, 0.10),
-                ('op_margin_trend', 'Margin Trend', 'pct', False, 0.10),
+                ('cfo_to_ni', 'Cash Quality (EMA)', 'ratio', False, 0.15),
             ]
 
             rows = []
@@ -1065,17 +1095,18 @@ with tab4:
 
 with tab5:
     st.header("📚 Help")
-    with st.expander("⚖️ Quality Score Formula (v3)", expanded=True):
+    with st.expander("⚖️ Quality Score Formula (v3.1)", expanded=True):
         st.markdown("""
-        **8 metrics, EMA-weighted** (recent years count more):
+        **6 metrics, EMA-weighted** (recent years count more):
         ```
-        Quality Score = ROIC × 20% + FCF Margin × 15% + Revenue Growth × 10% +
-          Net Income Growth × 10% + Leverage × 15% + Margin Stability × 10% +
-          Cash Quality × 10% + Margin Trend × 10%
+        Quality Score = ROIC × 25% + FCF Margin × 20% + Cash Quality × 15% +
+          Leverage × 15% + EBITDA Growth × 15% + Revenue Growth × 10%
         ```
         - **EMA-weighted** (ROIC, FCF, Leverage, Cash Quality): 2022=10%, 2023=17%, 2024=28%, 2025=46%
-        - **Net Income Growth**: CAGR when both endpoints positive; special handling for turnarounds
-        - **Removed**: Interest Coverage (too noisy, redundant with Leverage)
+        - **EBITDA Growth**: replaces net-income growth — less distorted by tax/one-time/non-operating
+          items and above the inflation-accounting line for BIST. Net income still enters via Cash Quality.
+        - **Removed**: Interest Coverage, Margin Trend, Margin Volatility (noisy on 4-year windows;
+          trend was redundant with the growth metrics, volatility mostly tracked sector cyclicality).
         """)
     with st.expander("📊 Technical Indicators"):
         st.markdown("""
