@@ -55,13 +55,31 @@ def split_by_region(df):
         glob, bist = df.copy(), pd.DataFrame()
     return glob, bist, len(bist) > 0
 
+def _data_signature():
+    """Return a (mtime, size) tuple for fundamentals_raw.csv. Used as a
+    cache key so the lookups invalidate automatically when the pipeline
+    re-runs."""
+    try:
+        s = Path("data/fundamentals_raw.csv").stat()
+        return (s.st_mtime, s.st_size)
+    except Exception:
+        return None
+
+
 def load_tech_lookup():
     if TECH_PATH.exists():
         t = pd.read_csv(TECH_PATH)
         return dict(zip(t['ticker'], t['technical_rating']))
     return {}
 
+@st.cache_data(show_spinner=False)
+def _load_mcap_lookup_cached(_sig):
+    return _load_mcap_lookup_impl()
+
 def load_mcap_lookup():
+    return _load_mcap_lookup_cached(_data_signature())
+
+def _load_mcap_lookup_impl():
     """
     Build a {ticker → market cap in USD billions} dict.
 
@@ -111,7 +129,14 @@ def load_mcap_lookup():
         print(f"[GUI] load_mcap_lookup failed: {e}")
         return {}
 
+@st.cache_data(show_spinner=False)
+def _load_pe_lookup_cached(_sig):
+    return _load_pe_lookup_impl()
+
 def load_pe_lookup():
+    return _load_pe_lookup_cached(_data_signature())
+
+def _load_pe_lookup_impl():
     """
     Build a {ticker → P/E ratio} dict from data/fundamentals_raw.csv.
 
@@ -156,6 +181,189 @@ def load_pe_lookup():
         return dict(zip(dedup["ticker"], dedup["pe"]))
     except Exception as e:
         print(f"[GUI] load_pe_lookup failed: {e}")
+        return {}
+
+
+# Row-matching key lists, mirrored from compute_detailed_metrics.py.
+# Kept local rather than imported so the GUI module has no compile-time
+# dependency on the scoring module (matters when the pipeline hasn't run yet).
+_EQUITY_KEYS = ["Total Equity Gross Minority Interest", "Stockholders Equity",
+                "Total Stockholder Equity", "Common Stock Equity"]
+_DEBT_KEYS = ["Total Debt", "Long Term Debt And Capital Lease Obligation",
+              "Total Liabilities Net Minority Interest"]
+_CASH_KEYS = ["Cash And Cash Equivalents",
+              "Cash Cash Equivalents And Short Term Investments"]
+_EBITDA_KEYS = ["EBITDA", "Normalized EBITDA"]
+
+
+def _statement_path(ticker: str, kind: str) -> Path:
+    """Resolve a statement CSV path, handling both ASELS_IS_balance.csv
+    and ASELS.IS_balance.csv naming conventions."""
+    raw_dir = Path("data/fundamentals/raw")
+    candidates = [
+        raw_dir / f"{ticker}_{kind}.csv",
+        raw_dir / f"{ticker.replace('.', '_')}_{kind}.csv",
+    ]
+    return next((p for p in candidates if p.exists()), None)
+
+
+def _get_latest_row_value(df, names):
+    """Find a row by trying the candidate names in order; return the latest
+    (right-most) column value, parsed as a float, or NaN if not found."""
+    for n in names:
+        if n in df.index:
+            row = df.loc[n]
+            try:
+                v = pd.to_numeric(row, errors="coerce")
+                v = v.dropna()
+                if len(v) > 0:
+                    # yfinance returns columns newest-first → leftmost is latest
+                    return float(v.iloc[0])
+            except Exception:
+                continue
+    return float("nan")
+
+
+@st.cache_data(show_spinner=False)
+def _load_pb_lookup_cached(_sig):
+    return _load_pb_lookup_impl()
+
+def load_pb_lookup():
+    return _load_pb_lookup_cached(_data_signature())
+
+def _load_pb_lookup_impl():
+    """
+    Build a {ticker → P/B ratio} dict.
+
+    P/B = market_cap / stockholders_equity. Both are in the company's native
+    currency, so the ratio is currency-neutral (no FX conversion needed).
+
+    Edge cases:
+      - Equity ≤ 0 → omitted (some buyback-heavy companies have negative
+        book value; P/B is misleading in that case).
+      - Astronomical P/B (>99) → capped at 99 to keep the column readable.
+        P/B over 100 is rare and almost always indicates either a data
+        error or an extremely asset-light business; either way the exact
+        number isn't informative.
+      - Missing balance sheet → ticker omitted.
+    """
+    try:
+        raw_path = Path("data/fundamentals_raw.csv")
+        if not raw_path.exists():
+            return {}
+        raw = pd.read_csv(raw_path)
+        if "ticker" not in raw.columns or "market_cap" not in raw.columns:
+            return {}
+        raw["market_cap"] = pd.to_numeric(raw["market_cap"], errors="coerce")
+
+        result = {}
+        # Iterate tickers in market_cap-descending order so dedup keeps the
+        # row with the largest market cap when a ticker appears in multiple
+        # sectors.
+        seen = set()
+        for _, row in raw.sort_values("market_cap", ascending=False).iterrows():
+            ticker = row.get("ticker")
+            if not ticker or ticker in seen:
+                continue
+            mc = row.get("market_cap")
+            if pd.isna(mc) or mc <= 0:
+                continue
+
+            balance_path = _statement_path(ticker, "balance")
+            if balance_path is None:
+                continue
+            try:
+                balance = pd.read_csv(balance_path, index_col=0)
+            except Exception:
+                continue
+            equity = _get_latest_row_value(balance, _EQUITY_KEYS)
+            if pd.isna(equity) or equity <= 0:
+                continue
+
+            pb = mc / equity
+            result[ticker] = min(pb, 99.0)
+            seen.add(ticker)
+        return result
+    except Exception as e:
+        print(f"[GUI] load_pb_lookup failed: {e}")
+        return {}
+
+
+@st.cache_data(show_spinner=False)
+def _load_ev_ebitda_lookup_cached(_sig):
+    return _load_ev_ebitda_lookup_impl()
+
+def load_ev_ebitda_lookup():
+    return _load_ev_ebitda_lookup_cached(_data_signature())
+
+def _load_ev_ebitda_lookup_impl():
+    """
+    Build a {ticker → EV/EBITDA ratio} dict.
+
+    Enterprise Value (EV) = Market Cap + Total Debt − Cash & Equivalents
+    EV/EBITDA captures both equity and debt valuation, and uses an operating-
+    profit measure that's less distorted by tax/interest/one-time items than
+    net income. It's the default valuation ratio in professional finance.
+
+    Currency-neutral: all components (market_cap, debt, cash, EBITDA) are in
+    the company's native currency, so the ratio is unit-free.
+
+    Edge cases:
+      - EBITDA ≤ 0 → omitted (loss-making at the operating level; ratio is
+        meaningless).
+      - Missing debt → treated as 0 (companies legitimately reporting zero
+        debt do exist; this is correct behavior).
+      - Missing cash → treated as 0 (rare but harmless approximation).
+      - Astronomical EV/EBITDA (>999) → capped at 999, matching P/E behavior.
+    """
+    try:
+        raw_path = Path("data/fundamentals_raw.csv")
+        if not raw_path.exists():
+            return {}
+        raw = pd.read_csv(raw_path)
+        if "ticker" not in raw.columns or "market_cap" not in raw.columns:
+            return {}
+        raw["market_cap"] = pd.to_numeric(raw["market_cap"], errors="coerce")
+
+        result = {}
+        seen = set()
+        for _, row in raw.sort_values("market_cap", ascending=False).iterrows():
+            ticker = row.get("ticker")
+            if not ticker or ticker in seen:
+                continue
+            mc = row.get("market_cap")
+            if pd.isna(mc) or mc <= 0:
+                continue
+
+            balance_path = _statement_path(ticker, "balance")
+            income_path = _statement_path(ticker, "income")
+            if balance_path is None or income_path is None:
+                continue
+            try:
+                balance = pd.read_csv(balance_path, index_col=0)
+                income = pd.read_csv(income_path, index_col=0)
+            except Exception:
+                continue
+
+            ebitda = _get_latest_row_value(income, _EBITDA_KEYS)
+            if pd.isna(ebitda) or ebitda <= 0:
+                continue
+            debt = _get_latest_row_value(balance, _DEBT_KEYS)
+            cash = _get_latest_row_value(balance, _CASH_KEYS)
+            debt = 0.0 if pd.isna(debt) else debt
+            cash = 0.0 if pd.isna(cash) else cash
+
+            ev = mc + debt - cash
+            ev_ebitda = ev / ebitda
+            # EV can theoretically be negative (massive cash, tiny mcap) →
+            # cap at 0 since a negative EV/EBITDA isn't a useful signal here.
+            if ev_ebitda <= 0:
+                continue
+            result[ticker] = min(ev_ebitda, 999.0)
+            seen.add(ticker)
+        return result
+    except Exception as e:
+        print(f"[GUI] load_ev_ebitda_lookup failed: {e}")
         return {}
 
 def score_color(score):
@@ -344,6 +552,8 @@ with tab2:
         tech_lookup = load_tech_lookup()
         mcap_lookup = load_mcap_lookup()
         pe_lookup = load_pe_lookup()
+        pb_lookup = load_pb_lookup()
+        ev_lookup = load_ev_ebitda_lookup()
 
         def format_scores_table(df):
             """Numeric columns stay numeric for proper sorting."""
@@ -362,9 +572,13 @@ with tab2:
             # Market cap (USD billions) — numeric for proper sorting
             if mcap_lookup:
                 out['Mcap $B'] = out['ticker'].map(mcap_lookup).round(1)
-            # P/E ratio — currency-neutral, NaN for loss-makers
+            # Valuation ratios — currency-neutral, NaN for loss-makers / weird capital structures
             if pe_lookup:
                 out['P/E'] = out['ticker'].map(pe_lookup).round(1)
+            if pb_lookup:
+                out['P/B'] = out['ticker'].map(pb_lookup).round(1)
+            if ev_lookup:
+                out['EV/EBITDA'] = out['ticker'].map(ev_lookup).round(1)
             return out
 
         def add_quality_indicator(df):
@@ -523,6 +737,29 @@ with tab4:
             with c2: st.metric("Tier", tier)
             with c3: st.metric("Category", category)
             with c4: st.metric("Data Complete", f"{rs.get('data_completeness', 100):.0f}%")
+
+            # --- VALUATION METRIC CARDS ---
+            # Currency-neutral ratios; computed on demand from cached lookups.
+            lookup_mcap = load_mcap_lookup()
+            lookup_pe = load_pe_lookup()
+            lookup_pb = load_pb_lookup()
+            lookup_ev = load_ev_ebitda_lookup()
+            v_mcap = lookup_mcap.get(ticker)
+            v_pe = lookup_pe.get(ticker)
+            v_pb = lookup_pb.get(ticker)
+            v_ev = lookup_ev.get(ticker)
+            v1, v2, v3, v4 = st.columns(4)
+            with v1:
+                st.metric("Market Cap", f"${v_mcap:.1f}B" if v_mcap is not None and pd.notna(v_mcap) else "—")
+            with v2:
+                st.metric("P/E", f"{v_pe:.1f}x" if v_pe is not None and pd.notna(v_pe) else "—",
+                          help="Price / Earnings. N/A for loss-making companies.")
+            with v3:
+                st.metric("P/B", f"{v_pb:.1f}x" if v_pb is not None and pd.notna(v_pb) else "—",
+                          help="Price / Book Value. N/A when equity is negative (heavy buybacks).")
+            with v4:
+                st.metric("EV/EBITDA", f"{v_ev:.1f}x" if v_ev is not None and pd.notna(v_ev) else "—",
+                          help="Enterprise Value / EBITDA. Includes debt; less distorted by tax/one-time items than P/E.")
 
             # --- STOCK PRICE CHART (USD for BIST, native USD for global) ---
             st.markdown("---")
@@ -778,10 +1015,16 @@ with tab4:
             peer_mcaps = load_mcap_lookup()
             if peer_mcaps:
                 pd_display['Mcap $B'] = pd_display['ticker'].map(peer_mcaps).round(1)
-            # P/E ratio — currency-neutral, NaN for loss-makers
+            # Valuation ratios — currency-neutral, NaN for loss-makers / negative equity
             peer_pes = load_pe_lookup()
             if peer_pes:
                 pd_display['P/E'] = pd_display['ticker'].map(peer_pes).round(1)
+            peer_pbs = load_pb_lookup()
+            if peer_pbs:
+                pd_display['P/B'] = pd_display['ticker'].map(peer_pbs).round(1)
+            peer_evs = load_ev_ebitda_lookup()
+            if peer_evs:
+                pd_display['EV/EBITDA'] = pd_display['ticker'].map(peer_evs).round(1)
             st.dataframe(pd_display, use_container_width=True, hide_index=True)
 
             # --- TECHNICAL ---
@@ -838,6 +1081,31 @@ with tab5:
         st.markdown("""
         **26 indicators** vote Buy/Neutral/Sell. 15 MAs + 11 Oscillators.
         Strong Buy ≥ 75 · Buy ≥ 55 · Hold 45-55 · Sell ≥ 25 · Strong Sell < 25
+        """)
+    with st.expander("💰 Valuation Ratios"):
+        st.markdown("""
+        Three currency-neutral valuation ratios are shown alongside quality
+        scores. They are **not** baked into the quality score — they're a
+        parallel signal so a great business at a bad price is still flagged
+        as great quality, with valuation visible for context.
+
+        - **P/E (Price / Earnings)** — `market_cap / net_income`.
+          The classic valuation ratio. Shown as N/A for loss-making companies.
+          Capped at 999x for stocks with very small earnings.
+
+        - **P/B (Price / Book)** — `market_cap / stockholders_equity`.
+          A "value investor" lens. Useful for capital-intensive businesses.
+          Shown as N/A when equity is negative (some buyback-heavy companies
+          like MCD have negative book value).
+
+        - **EV/EBITDA** — `(market_cap + total_debt − cash) / EBITDA`.
+          The professional-analyst default. Captures both equity and debt;
+          less distorted by tax/interest/one-time items than P/E. Shown as
+          N/A when EBITDA is negative.
+
+        All three are **currency-neutral** (TRY/TRY cancels just like USD/USD),
+        so BIST ratios are directly comparable to US peers — no FX conversion
+        needed. A 13× P/E means the same thing on Borsa Istanbul as on NYSE.
         """)
     with st.expander("🇹🇷 BIST / USD Conversion"):
         st.markdown("""
